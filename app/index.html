@@ -3,96 +3,21 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Saltline Cover Studio — multi-panel cover art from your photos</title>
-<link rel="stylesheet" href="style.css">
+<title>Cover Snap</title>
+<link rel="stylesheet" href="./style.css">
 </head>
 <body>
-<header class="topbar">
-  <div class="brand">
-    <span class="brand-name">SALTLINE</span>
-    <span class="brand-sub">COVER STUDIO</span>
-    <span class="brand-tag">Your photos as a sunset crime-epic poster. Three steps, one PNG.</span>
-  </div>
-  <ol class="steps">
-    <li class="step" id="stepPhotos"><span class="step-num">1</span> Add photos</li>
-    <li class="step" id="stepLayout"><span class="step-num">2</span> Pick a layout</li>
-    <li class="step step-hot" id="stepExport"><span class="step-num">3</span> Export</li>
-  </ol>
-</header>
-
-<main class="workspace">
-  <aside class="tray">
-    <h2>Photos</h2>
-    <button class="btn btn-hot" id="addPhotosBtn" type="button">Add photos</button>
-    <button class="btn" id="samplesBtn" type="button">Load samples</button>
-    <button class="btn btn-magic" id="autoCoverBtn" type="button">Auto Cover</button>
-    <div class="drop-note" id="dropNote">Drop photos here<br><span>never uploaded</span></div>
-    <div class="tray-grid" id="trayGrid"></div>
-    <p class="tray-hint">Click a photo, then click a panel to place it — or drag the panel itself to reframe.</p>
-    <input type="file" id="fileInput" accept="image/*" multiple hidden>
-  </aside>
-
-  <section class="stage">
-    <div class="stage-wrap" id="stageWrap">
-      <canvas id="stageCanvas" width="960" height="540"></canvas>
-      <div class="drag-hint" id="dragHint">Drag to move &middot; Scroll to zoom</div>
-    </div>
-    <div class="stage-bar">
-      <label class="zoom-label" for="zoomSlider">Panel zoom</label>
-      <button class="btn btn-small" id="zoomOutBtn" type="button">&minus;</button>
-      <input type="range" id="zoomSlider" min="100" max="350" value="100">
-      <button class="btn btn-small" id="zoomInBtn" type="button">+</button>
-      <button class="btn btn-small" id="smartCropBtn" type="button">Smart crop</button>
-      <button class="btn btn-small" id="resetCropBtn" type="button">Reset crop</button>
-      <span class="stage-spacer"></span>
-      <button class="btn btn-small" id="undoBtn" type="button">Undo</button>
-      <button class="btn btn-small" id="redoBtn" type="button">Redo</button>
-    </div>
+<main class="app">
+  <section class="controls">
+    <h1>Cover Snap</h1>
+    <p>A photo and a caption, made into a square cover.</p>
+    <label>Photo <input id="photo" type="file" accept="image/*"></label>
+    <label>Caption <input id="caption" type="text" maxlength="40" value="Sunset Heist"></label>
+    <button id="export" type="button">Export PNG 1080 x 1080</button>
+    <p id="status" role="status"></p>
   </section>
-
-  <aside class="rail">
-    <h2>Layout</h2>
-    <div class="layout-grid" id="layoutGrid"></div>
-
-    <h2>Grade</h2>
-    <div class="grade-grid" id="gradeGrid"></div>
-    <label class="toggle-row">
-      <input type="checkbox" id="autoGradeToggle" checked>
-      <span>Auto grade &mdash; balances each photo first</span>
-    </label>
-
-    <h2>Poster ink</h2>
-    <label class="toggle-row">
-      <input type="checkbox" id="inkToggle" checked>
-      <span>Ink on</span>
-      <input type="range" id="inkSlider" min="0" max="100" value="72">
-    </label>
-    <label class="slider-row">
-      <span>Halftone</span>
-      <input type="range" id="halftoneSlider" min="0" max="100" value="55">
-    </label>
-
-    <h2>Caption</h2>
-    <input class="text-input" id="titleInput" type="text" value="MARINA HEAT" maxlength="26" aria-label="Cover title">
-    <input class="text-input" id="subInput" type="text" value="Saltline Nights" maxlength="30" aria-label="Cover subtitle">
-    <input class="text-input" id="tagInput" type="text" value="One summer on the coast" maxlength="34" aria-label="Cover tagline">
-
-    <label class="slider-row">
-      <span>Heat &#9733;</span>
-      <input type="range" id="heatSlider" min="0" max="5" step="1" value="5">
-      <label class="badge-check"><input type="checkbox" id="badgeToggle" checked> Badge</label>
-    </label>
-
-    <h2>Size</h2>
-    <div class="size-grid" id="sizeGrid"></div>
-
-    <button class="btn btn-export" id="exportBtn" type="button">Export PNG</button>
-    <p class="status-line" id="statusLine">Loading samples&hellip;</p>
-  </aside>
+  <canvas id="cover" width="1080" height="1080" aria-label="The cover"></canvas>
 </main>
-
-<canvas id="shotCanvas" hidden></canvas>
-
-<script type="module" src="src/main.js"></script>
+<script type="module" src="./src/main.js"></script>
 </body>
 </html>

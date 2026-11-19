@@ -1,16 +1,51 @@
-// main.js — the studio's entry point. With no query string it opens the
-// editor (samples loaded, ready to make a cover); with ?shot= it builds one
-// of the fixed screenshot scenes instead (see shots.js).
-
-import { Editor } from './editor.js';
+// Wires the page: pick a photo, type a caption, export the square cover as a PNG. A `?shot=` query sets up a fixed
+// scene for a screenshot instead (./shots.js).
+import { drawCover } from './cover.js';
 import { runShot } from './shots.js';
 
-const query = new URLSearchParams(window.location.search);
+const canvas = document.getElementById('cover');
+const caption = document.getElementById('caption');
+const status = document.getElementById('status');
+let photo = null;
 
-if (query.get('shot')) {
-  runShot(query);
+function redraw() {
+  drawCover(canvas, photo, caption.value);
+}
+
+/** Loads an image from a URL, resolving to the image once it can be drawn. */
+export function loadImage(url) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = url;
+  });
+}
+
+document.getElementById('photo').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  photo = await loadImage(URL.createObjectURL(file));
+  redraw();
+});
+caption.addEventListener('input', redraw);
+document.getElementById('export').addEventListener('click', () => {
+  canvas.toBlob((blob) => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'cover-1080x1080.png';
+    a.click();
+    status.textContent = 'Saved cover-1080x1080.png';
+  }, 'image/png');
+});
+
+const shot = new URLSearchParams(location.search).get('shot');
+if (shot) {
+  runShot(shot, new URLSearchParams(location.search), async (sample, text) => {
+    photo = await loadImage(sample);
+    caption.value = text;
+    redraw();
+  });
 } else {
-  const editor = new Editor(document);
-  editor.loadSamples();
-  window.saltlineEditor = editor;
+  redraw();
 }
