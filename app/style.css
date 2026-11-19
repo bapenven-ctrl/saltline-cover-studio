@@ -1,12 +1,77 @@
-html, body { margin: 0; height: 100%; background: #f2f0f4; color: #1d1b22; font: 15px/1.4 system-ui, sans-serif; }
-.app { display: flex; gap: 32px; align-items: center; justify-content: center; height: 100%; padding: 24px; box-sizing: border-box; }
-.controls { display: flex; flex-direction: column; gap: 14px; width: 280px; }
-.controls h1 { margin: 0; font-size: 28px; }
-.controls p { margin: 0; color: #5c5866; }
-label { display: flex; flex-direction: column; gap: 6px; font-weight: 600; }
-input[type=text] { font: inherit; padding: 8px; border: 1px solid #c9c4d1; border-radius: 6px; }
-button { font: inherit; font-weight: 700; padding: 10px; border: 0; border-radius: 6px; background: #1d1b22; color: #fff; cursor: pointer; }
-canvas { width: min(70vh, 60vw); height: min(70vh, 60vw); box-shadow: 0 8px 30px rgba(0, 0, 0, 0.2); }
-body.shot-cover .controls { display: none; }
-body.shot-cover .app { padding: 0; }
-body.shot-cover canvas { width: 100vw; height: 100vh; box-shadow: none; }
+@font-face {
+  font-family: 'Anton';
+  src: url('./fonts/Anton-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+}
+@font-face {
+  font-family: 'Pacifico';
+  src: url('./fonts/Pacifico-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; }
+body {
+  background: #0d0817;
+  color: #f3ecff;
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+.app { display: flex; align-items: stretch; min-height: 100vh; }
+.toolbar {
+  width: 320px; flex: 0 0 320px; overflow-y: auto; max-height: 100vh;
+  padding: 20px 18px 28px; background: #171029;
+  border-right: 1px solid #322254;
+  display: flex; flex-direction: column; gap: 18px;
+}
+.brand h1 {
+  margin: 0 0 6px; font-family: Anton, sans-serif; font-weight: 400;
+  font-size: 27px; letter-spacing: 0.04em; line-height: 1.08;
+  background: linear-gradient(92deg, #ffe9a8, #ff9a3d 55%, #ff3d7e);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.brand p { margin: 0; color: #b9a8d9; font-size: 13px; }
+.group { border-top: 1px solid #2c1e4d; padding-top: 14px; display: flex; flex-direction: column; gap: 10px; }
+.group h2 {
+  margin: 0; font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: #ffb03a;
+}
+label { display: flex; flex-direction: column; gap: 5px; font-weight: 600; font-size: 13px; color: #ddd0f5; }
+label.check { flex-direction: row; align-items: center; gap: 8px; font-weight: 500; }
+input[type="text"], select {
+  font: inherit; padding: 8px 10px; border-radius: 8px;
+  border: 1px solid #463273; background: #221640; color: #fff;
+}
+input[type="range"] { width: 100%; accent-color: #ff7a3d; }
+input[type="checkbox"] { accent-color: #ff7a3d; width: 16px; height: 16px; }
+input[type="file"] { font: inherit; color: #b9a8d9; }
+.file-label {
+  border: 1px dashed #5b4396; border-radius: 8px; padding: 9px 10px;
+  cursor: pointer; background: #1e1436;
+}
+.hint { margin: 0; font-size: 12px; color: #9d8bc4; }
+.photo-strip { display: flex; flex-wrap: wrap; gap: 7px; }
+.thumb {
+  font: inherit; font-size: 12px; font-weight: 700; padding: 7px 11px;
+  border-radius: 999px; border: 1px solid #463273; background: #221640; color: #e8ddff; cursor: pointer;
+}
+.thumb.active { background: #ff7a3d; border-color: #ff7a3d; color: #22102e; }
+button#export {
+  font: inherit; font-weight: 800; padding: 11px 12px; border: 0; border-radius: 9px;
+  background: linear-gradient(92deg, #ff9a3d, #ff3d7e); color: #fff; cursor: pointer;
+}
+#status { margin: 0; min-height: 18px; color: #8be0a4; font-size: 12px; }
+.stage {
+  flex: 1; display: flex; align-items: center; justify-content: center;
+  padding: 26px; background: radial-gradient(900px 600px at 60% 30%, #241545, #0d0817);
+}
+.stage.dragging { outline: 3px dashed #ff9a3d; outline-offset: -12px; }
+canvas#cover {
+  max-width: min(92%, 760px); max-height: calc(100vh - 52px); width: auto; height: auto;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.65); background: #160b2a; cursor: grab;
+  object-fit: contain;
+}
+body.shot-cover .toolbar { display: none; }
+body.shot-cover .app { min-height: 0; }
+body.shot-cover .stage { padding: 0; background: #160b2a; }
+body.shot-cover canvas#cover { width: 100vw; height: 100vh; max-width: none; max-height: none; box-shadow: none; }
