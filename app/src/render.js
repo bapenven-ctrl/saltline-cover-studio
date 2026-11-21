@@ -1,517 +1,452 @@
-// render.js — Draws a finished Saltline cover onto a canvas.
-// Pipeline per panel: crop the assigned photo (smart or manual), paint it to
-// a small offscreen canvas, apply the grade, then stamp it into the panel
-// rectangle with its frame and its character callout chip. Over the panels
-// goes the poster furniture: a masthead band with stars and a pull-quote, a
-// chrome title block with script subtitle and tagline ribbon, and a credits
-// strip with barcode and seal. On the poster and ensemble layouts the title
-// block sits in its own painted sunset bed below the panels, never over
-// them. A vignette and fine grain finish the sheet.
+// render.js — Paints a finished Saltline cover onto a canvas.
+//
+// The paint order is the poster's own logic: background, photo panels
+// with their frames, then the furniture — masthead, cast callouts, the
+// chrome title block, and the credits strip. Two title geometries
+// exist. In the print layouts (Poster, Ensemble) the title lives in a
+// bed of its own below the panels. In the wide and classic layouts it
+// overlaps the bottom centre of the panel area, and any callout chip
+// that would slide under the tagline ribbon is lifted clear of it, so
+// no face and no label is ever covered by the lettering.
 
-import { getPanelRects, furnitureZones, POSTER_LAYOUTS } from './panels.js';
-import { lutForGrade, applyLUTToImageData, posterizeBlend, hardPosterize, resolveGradeId } from './grades.js';
-import { sourceRectForPanel } from './smartcrop.js';
+import { layoutZones } from './panels.js';
+import { gradedCopy } from './grades.js';
+import { panelSourceRect } from './smartcrop.js';
 
 export const EXPORT_SIZES = [
-  { id: '1080x1080', label: 'Square 1080 x 1080', w: 1080, h: 1080 },
-  { id: '1080x1350', label: 'Portrait 1080 x 1350', w: 1080, h: 1350 },
-  { id: '1920x1080', label: 'Wide 1920 x 1080', w: 1920, h: 1080 },
-  { id: '1080x1920', label: 'Story 1080 x 1920', w: 1080, h: 1920 },
+  { id: '1080x1080', label: 'Square — 1080 × 1080', w: 1080, h: 1080 },
+  { id: '1080x1350', label: 'Portrait — 1080 × 1350', w: 1080, h: 1350 },
+  { id: '1920x1080', label: 'Wide — 1920 × 1080', w: 1920, h: 1080 },
+  { id: '1080x1920', label: 'Story — 1080 × 1920', w: 1080, h: 1920 },
 ];
 
 export function sizeById(id) {
   return EXPORT_SIZES.find((s) => s.id === id) || EXPORT_SIZES[2];
 }
 
-// Default character callouts, by sample photo key.
-export const PHOTO_LABELS = {
-  driver: 'THE DRIVER',
-  pier: 'THE CAPTAIN',
-  redhead: 'THE FIXER',
-  rider: 'THE RIDER',
-  marina: 'THE INSIDER',
-  rooftop: 'THE BOSS',
-  neon: 'THE COURIERS',
-  motel: 'THE HIDEOUT',
-};
+const INK = '#150a2e';
+const GOLD = '#d9a441';
+const CREAM = '#ffe9c4';
 
-export function defaultLabelFor(photo) {
-  if (!photo) return '';
-  return PHOTO_LABELS[photo.key] || (photo.name ? photo.name.toUpperCase() : '');
-}
-
-function paintHalftone(ctx, w, h) {
-  const img = ctx.getImageData(0, 0, w, h);
-  const d = img.data;
-  const gap = Math.max(6, Math.round(w / 46));
-  ctx.fillStyle = 'rgba(10, 6, 20, 0.5)';
-  for (let y = gap / 2; y < h; y += gap) {
-    for (let x = gap / 2; x < w; x += gap) {
-      const i = (Math.floor(y) * w + Math.floor(x)) * 4;
-      const lum = (d[i] + d[i + 1] + d[i + 2]) / 765;
-      if (lum < 0.42) {
-        const rad = (0.42 - lum) * gap * 0.62;
-        ctx.beginPath(); ctx.arc(x, y, Math.max(0.6, rad), 0, Math.PI * 2); ctx.fill();
-      }
-    }
-  }
-}
-
-function paintPanel(ctx, image, panelRect, panelState, lut, options) {
-  const pw = Math.max(2, Math.round(panelRect.w));
-  const ph = Math.max(2, Math.round(panelRect.h));
-  const off = document.createElement('canvas');
-  off.width = pw; off.height = ph;
-  const octx = off.getContext('2d', { willReadFrequently: true });
-  if (image) {
-    const src = sourceRectForPanel(image, panelRect, panelState);
-    octx.drawImage(image, src.sx, src.sy, src.sw, src.sh, 0, 0, pw, ph);
-  } else {
-    const grad = octx.createLinearGradient(0, 0, pw, ph);
-    grad.addColorStop(0, '#3a2358'); grad.addColorStop(1, '#120a24');
-    octx.fillStyle = grad; octx.fillRect(0, 0, pw, ph);
-  }
-  let data = octx.getImageData(0, 0, pw, ph);
-  applyLUTToImageData(data, lut, options.gradeId === 'key-art' ? 0.78 : 0.8);
-  if (options.gradeId === 'key-art') {
-    // The Key Art finish: gentle many-band posterize over the graded photo.
-    data = posterizeBlend(data, 18, 0.45, 1.12);
-  } else if (options.posterInk) {
-    data = hardPosterize(data, 7, 1.22);
-  }
-  octx.putImageData(data, 0, 0);
-  if (options.halftone) paintHalftone(octx, pw, ph);
-
-  ctx.save();
-  ctx.translate(panelRect.x + panelRect.w / 2, panelRect.y + panelRect.h / 2);
-  ctx.rotate(panelRect.rot || 0);
-  ctx.drawImage(off, -panelRect.w / 2, -panelRect.h / 2, panelRect.w, panelRect.h);
-  if (options.thinFrame) {
-    const lw = Math.max(2, Math.round(Math.min(options.W, options.H) * 0.0032));
-    ctx.strokeStyle = 'rgba(255, 246, 230, 0.92)';
-    ctx.lineWidth = lw;
-    ctx.strokeRect(-panelRect.w / 2 + lw / 2, -panelRect.h / 2 + lw / 2, panelRect.w - lw, panelRect.h - lw);
-  } else {
-    const border = Math.max(3, Math.round(Math.min(panelRect.w, panelRect.h) * 0.016));
-    ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = border;
-    ctx.strokeRect(-panelRect.w / 2 + border / 2, -panelRect.h / 2 + border / 2, panelRect.w - border, panelRect.h - border);
-  }
-  ctx.restore();
-}
-
-// Slanted character callout chip at a panel's bottom-left corner. When
-// maxBottom is given, the chip rides up so its bottom edge stays above it.
-function paintCallout(ctx, panelRect, label, H, maxBottom = null) {
-  const text = (label || '').trim().toUpperCase();
-  if (!text) return;
-  const inset = Math.max(6, Math.round(Math.min(panelRect.w, panelRect.h) * 0.045));
-  const ch = Math.max(17, Math.round(Math.min(panelRect.h * 0.115, H * 0.05)));
-  let size = Math.round(ch * 0.56);
-  ctx.save();
-  ctx.font = `400 ${size}px Anton, sans-serif`;
-  try { ctx.letterSpacing = `${Math.max(1, Math.round(size * 0.06))}px`; } catch { /* default spacing */ }
-  const tickW = Math.round(ch * 0.16);
-  const padX = Math.round(ch * 0.34);
-  let textW = ctx.measureText(text).width;
-  const maxW = panelRect.w - inset * 2;
-  while (textW + tickW + padX * 2 > maxW && size > 9) {
-    size -= 1;
-    ctx.font = `400 ${size}px Anton, sans-serif`;
-    textW = ctx.measureText(text).width;
-  }
-  const cw = Math.round(textW + tickW + padX * 2);
-  const x = panelRect.x + inset;
-  let y = panelRect.y + panelRect.h - inset - ch;
-  if (maxBottom != null && y + ch > maxBottom) y = maxBottom - ch;
-  const slant = Math.round(ch * 0.36);
+function rr(ctx, x, y, w, h, r) {
+  const rad = Math.min(r, w / 2, h / 2);
   ctx.beginPath();
-  ctx.moveTo(x, y + ch);
-  ctx.lineTo(x + slant, y);
-  ctx.lineTo(x + cw + slant, y);
-  ctx.lineTo(x + cw, y + ch);
+  ctx.moveTo(x + rad, y);
+  ctx.arcTo(x + w, y, x + w, y + h, rad);
+  ctx.arcTo(x + w, y + h, x, y + h, rad);
+  ctx.arcTo(x, y + h, x, y, rad);
+  ctx.arcTo(x, y, x + w, y, rad);
   ctx.closePath();
-  ctx.fillStyle = 'rgba(10, 5, 20, 0.88)';
-  ctx.fill();
-  ctx.strokeStyle = 'rgba(255, 201, 77, 0.55)';
-  ctx.lineWidth = Math.max(1, Math.round(ch * 0.045));
-  ctx.stroke();
-  ctx.fillStyle = '#ffc94d';
-  ctx.fillRect(x + padX * 0.55, y + ch * 0.22, tickW, ch * 0.56);
-  ctx.fillStyle = '#ffffff';
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(text, x + padX * 0.55 + tickW + padX * 0.6, y + ch / 2 + size * 0.05);
-  try { ctx.letterSpacing = '0px'; } catch { /* nothing to reset */ }
-  ctx.restore();
 }
 
-function paintStar(ctx, cx, cy, r, color) {
+function star(ctx, cx, cy, r) {
   ctx.beginPath();
   for (let i = 0; i < 10; i++) {
     const rad = i % 2 === 0 ? r : r * 0.45;
     const a = -Math.PI / 2 + (i * Math.PI) / 5;
-    const px = cx + Math.cos(a) * rad, py = cy + Math.sin(a) * rad;
-    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    const x = cx + Math.cos(a) * rad;
+    const y = cy + Math.sin(a) * rad;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
   }
   ctx.closePath();
-  ctx.fillStyle = color;
-  ctx.fill();
 }
 
-function paintMasthead(ctx, W, H, mastH, margin) {
-  const grad = ctx.createLinearGradient(0, 0, 0, mastH);
-  grad.addColorStop(0, '#1a0c30');
-  grad.addColorStop(1, '#0d0618');
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, W, mastH);
-  ctx.fillStyle = '#ffc94d';
-  ctx.fillRect(0, mastH - Math.max(2, Math.round(mastH * 0.035)), W, Math.max(2, Math.round(mastH * 0.035)));
-
-  const cy = mastH / 2;
-  const starR = mastH * 0.2;
-  let x = margin + starR;
-  for (let i = 0; i < 5; i++) {
-    paintStar(ctx, x, cy, starR, '#ffc94d');
-    x += starR * 2 + starR * 0.55;
-  }
-  const textX = x + mastH * 0.12;
-
-  // VOL. 1 chip on the right.
-  const chipH = Math.round(mastH * 0.54);
-  const chipSize = Math.round(mastH * 0.27);
-  ctx.font = `400 ${chipSize}px Anton, sans-serif`;
-  const chipW = Math.round(ctx.measureText('VOL. 1').width + chipH * 0.9);
-  const chipX = W - margin - chipW;
-  const chipY = Math.round((mastH - chipH) / 2);
-  ctx.strokeStyle = '#ffc94d';
-  ctx.lineWidth = Math.max(1.5, mastH * 0.022);
-  ctx.beginPath(); ctx.roundRect(chipX, chipY, chipW, chipH, chipH * 0.22); ctx.stroke();
-  ctx.fillStyle = '#ffd98a';
-  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillText('VOL. 1', chipX + chipW / 2, chipY + chipH / 2 + 1);
-
-  // Pull-quote, two lines: the quote, then its attribution.
-  let qSize = Math.round(mastH * 0.315);
-  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
-  const quote = 'THE HOTTEST SUMMER ON RECORD';
-  ctx.font = `400 ${qSize}px Anton, sans-serif`;
-  try { ctx.letterSpacing = `${Math.round(qSize * 0.13)}px`; } catch { /* default spacing */ }
-  const maxQW = chipX - textX - mastH * 0.25;
-  while (ctx.measureText(quote).width > maxQW && qSize > 10) {
-    qSize -= 2;
-    ctx.font = `400 ${qSize}px Anton, sans-serif`;
-  }
-  ctx.fillStyle = '#f7ead0';
-  ctx.fillText(quote, textX, mastH * 0.47);
-  const aSize = Math.round(mastH * 0.145);
-  ctx.font = `400 ${aSize}px Anton, sans-serif`;
-  try { ctx.letterSpacing = `${Math.round(aSize * 0.3)}px`; } catch { /* default spacing */ }
-  ctx.fillStyle = '#c9a86a';
-  ctx.fillText('THE SALTLINE GAZETTE', textX, mastH * 0.8);
-  try { ctx.letterSpacing = '0px'; } catch { /* nothing to reset */ }
+function spacing(ctx, px) {
+  try { ctx.letterSpacing = `${px}px`; } catch { /* older engines ignore it */ }
 }
 
-function paintBarcode(ctx, x, y, w, h) {
-  ctx.fillStyle = '#f6f1e6';
-  ctx.fillRect(x, y, w, h);
-  let seed = 987654321;
-  const rand = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
-  ctx.fillStyle = '#14100c';
-  let bx = x + w * 0.05;
-  const barArea = w * 0.9;
-  while (bx < x + barArea) {
-    const bw = 1 + rand() * Math.max(1.6, w * 0.028);
-    if (rand() > 0.34) ctx.fillRect(bx, y + h * 0.08, bw, h * 0.66);
-    bx += bw + 1 + rand() * Math.max(1.4, w * 0.02);
-  }
-  ctx.font = `400 ${Math.max(6, Math.round(h * 0.2))}px monospace`;
-  ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-  ctx.fillStyle = '#14100c';
-  ctx.fillText('8 901234 567890', x + w / 2, y + h * 0.95);
+function noSpacing(ctx) {
+  try { ctx.letterSpacing = '0px'; } catch { /* ignore */ }
 }
 
-function paintSeal(ctx, cx, cy, r) {
-  ctx.beginPath();
-  const points = 16;
-  for (let i = 0; i < points * 2; i++) {
-    const rad = i % 2 === 0 ? r : r * 0.8;
-    const a = (i * Math.PI) / points;
-    const px = cx + Math.cos(a) * rad, py = cy + Math.sin(a) * rad;
-    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
-  }
-  ctx.closePath();
-  const grad = ctx.createRadialGradient(cx, cy, r * 0.1, cx, cy, r);
-  grad.addColorStop(0, '#ffe98a');
-  grad.addColorStop(1, '#f5a623');
-  ctx.fillStyle = grad;
-  ctx.fill();
-  ctx.strokeStyle = '#8a5a10';
-  ctx.lineWidth = Math.max(1, r * 0.045);
-  ctx.stroke();
-  ctx.fillStyle = '#2a1503';
-  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  const size = Math.max(6, Math.round(r * 0.27));
-  ctx.font = `400 ${size}px Anton, sans-serif`;
-  ctx.fillText('ORIGINAL', cx, cy - size * 0.58);
-  ctx.fillText('COVER ART', cx, cy + size * 0.12);
-  const size2 = Math.max(5, Math.round(r * 0.19));
-  ctx.font = `400 ${size2}px Anton, sans-serif`;
-  ctx.fillText('EST. 2026', cx, cy + size * 0.78);
-}
-
-function paintCredits(ctx, W, H, creditsH, margin) {
-  const top = H - creditsH;
-  const grad = ctx.createLinearGradient(0, top, 0, H);
-  grad.addColorStop(0, '#0d0618');
-  grad.addColorStop(1, '#170b2c');
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, top, W, creditsH);
-  ctx.fillStyle = '#ffc94d';
-  ctx.fillRect(0, top, W, Math.max(2, Math.round(creditsH * 0.04)));
-  const cy = top + creditsH / 2;
-
-  ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-  const csSize = Math.round(creditsH * 0.32);
-  ctx.font = `400 ${csSize}px Anton, sans-serif`;
-  try { ctx.letterSpacing = `${Math.round(csSize * 0.22)}px`; } catch { /* default spacing */ }
-  ctx.fillStyle = '#ffe9b0';
-  ctx.fillText('COMING SOON', margin, cy + 1);
-  const leftW = ctx.measureText('COMING SOON').width;
-  try { ctx.letterSpacing = '0px'; } catch { /* nothing to reset */ }
-
-  // Seal at the far right, barcode just left of it.
-  const sealR = creditsH * 0.46;
-  const sealX = W - margin - sealR;
-  const barW = Math.round(creditsH * 1.45), barH = Math.round(creditsH * 0.72);
-  const barX = Math.round(sealX - sealR - creditsH * 0.35 - barW);
-  paintBarcode(ctx, barX, Math.round(cy - barH / 2), barW, barH);
-  paintSeal(ctx, sealX, cy, sealR);
-
-  // Centre billing block, two tiny caps lines.
-  const centerX = Math.round((margin + leftW + barX) / 2);
-  const lineSize = Math.max(7, Math.round(creditsH * 0.155));
-  ctx.font = `400 ${lineSize}px Anton, sans-serif`;
-  try { ctx.letterSpacing = `${Math.round(lineSize * 0.18)}px`; } catch { /* default spacing */ }
-  ctx.fillStyle = '#cdbcf0';
-  ctx.textAlign = 'center';
-  ctx.fillText('A SALTLINE PICTURES PRODUCTION · STARRING YOU', centerX, cy - lineSize * 0.62);
-  ctx.fillText('SHOT ON YOUR OWN CAMERA · GRADED BY HAND', centerX, cy + lineSize * 0.72);
-  try { ctx.letterSpacing = '0px'; } catch { /* nothing to reset */ }
-}
-
-function fitFont(ctx, text, family, startSize, maxWidth, spacingRatio = 0) {
+// Shrink a font size until the text fits maxWidth. Returns the size.
+function fitSize(ctx, text, family, weight, startSize, maxWidth) {
   let size = startSize;
-  ctx.font = `400 ${size}px ${family}`;
-  if (spacingRatio) { try { ctx.letterSpacing = `${Math.round(size * spacingRatio)}px`; } catch { /* default */ } }
-  while (ctx.measureText(text).width > maxWidth && size > 12) {
-    size -= 3;
-    ctx.font = `400 ${size}px ${family}`;
-    if (spacingRatio) { try { ctx.letterSpacing = `${Math.round(size * spacingRatio)}px`; } catch { /* default */ } }
+  while (size > 8) {
+    ctx.font = `${weight} ${size}px ${family}`;
+    if (ctx.measureText(text).width <= maxWidth) break;
+    size *= 0.94;
   }
   return size;
 }
 
-// The title bed: a designed sunset field — deep purple melting into
-// magenta, a soft sun disc glowing behind where the title will sit, and a
-// gold rule along the top edge where the panel zone ends. Painted only for
-// the layouts that reserve a bed (poster, ensemble).
-function paintTitleBed(ctx, W, bedTop, creditsTop) {
-  const bedH = creditsTop - bedTop;
-  const grad = ctx.createLinearGradient(0, bedTop, 0, creditsTop);
-  grad.addColorStop(0, '#2b0a4e');
-  grad.addColorStop(0.55, '#5c0f6e');
-  grad.addColorStop(1, '#93196d');
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, bedTop, W, bedH);
-  ctx.save();
-  ctx.beginPath(); ctx.rect(0, bedTop, W, bedH); ctx.clip();
-  const sunGrad = ctx.createLinearGradient(0, bedTop + bedH * 0.21, 0, bedTop + bedH * 0.95);
-  sunGrad.addColorStop(0, 'rgba(255, 150, 61, 0.5)');
-  sunGrad.addColorStop(1, 'rgba(255, 61, 138, 0.5)');
-  ctx.fillStyle = sunGrad;
-  ctx.beginPath();
-  ctx.arc(W / 2, bedTop + bedH * 0.58, bedH * 0.37, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
-  ctx.fillStyle = '#ffc94d';
-  ctx.fillRect(0, bedTop, W, Math.max(2, Math.round(bedH * 0.008)));
-}
-
-// Chrome title block: title, script subtitle, tagline ribbon — stacked
-// above the credits strip with every line fully inside the canvas. When
-// bedTop is given (poster, ensemble), the whole stack is sized to the bed
-// and the title shrinks until its cap top clears the bed's top edge, so
-// no letter ever reaches the panels above.
-function paintTitleBlock(ctx, W, H, state, creditsTop, bedTop = null) {
-  const title = (state.caption || '').trim().toUpperCase();
-  const sub = (state.subtitle || '').trim();
-  const tagline = (state.tagline || '').trim().toUpperCase();
-  const bedH = bedTop != null ? creditsTop - bedTop : 0;
-  const marginBottom = bedTop != null ? Math.round(bedH * 0.05) : Math.round(H * 0.016);
-
-  // Tagline ribbon at the bottom of the stack.
-  const ribH = bedTop != null ? Math.round(bedH * 0.15) : Math.round(H * 0.047);
-  const ribBottom = creditsTop - marginBottom;
-  const ribTop = ribBottom - ribH;
-  if (tagline) {
-    const tSize = fitFont(ctx, tagline, 'Anton, sans-serif', Math.round(ribH * 0.5), W * 0.8, 0.16);
-    ctx.font = `400 ${tSize}px Anton, sans-serif`;
-    const tw = ctx.measureText(tagline).width + tSize * 0.16 * tagline.length;
-    const ribW = Math.min(W * 0.92, Math.round(tw + ribH * 1.1));
-    const ribX = Math.round((W - ribW) / 2);
-    ctx.fillStyle = 'rgba(11, 5, 22, 0.92)';
-    ctx.beginPath(); ctx.roundRect(ribX, ribTop, ribW, ribH, ribH * 0.18); ctx.fill();
-    ctx.strokeStyle = '#ffc94d'; ctx.lineWidth = Math.max(1.5, ribH * 0.045); ctx.stroke();
-    ctx.fillStyle = '#ffe9b0';
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText(tagline, W / 2, ribTop + ribH / 2 + 1);
-    try { ctx.letterSpacing = '0px'; } catch { /* nothing to reset */ }
-  }
-
-  // Script subtitle with a neon glow, just above the ribbon.
-  let subBaseline = ribTop - (bedTop != null ? Math.round(bedH * 0.03) : Math.round(H * 0.012));
-  if (sub) {
-    const sSize = fitFont(ctx, sub, 'Pacifico, cursive', bedTop != null ? Math.round(bedH * 0.16) : Math.round(H * 0.05), W * 0.72);
-    ctx.font = `400 ${sSize}px Pacifico, cursive`;
-    ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-    ctx.shadowColor = '#ff2d78';
-    ctx.shadowBlur = sSize * 0.45;
-    ctx.fillStyle = '#ff77ad';
-    ctx.fillText(sub, W / 2, subBaseline);
-    ctx.fillText(sub, W / 2, subBaseline);
-    ctx.shadowBlur = sSize * 0.12;
-    ctx.fillStyle = '#ffe3ef';
-    ctx.fillText(sub, W / 2, subBaseline);
-    ctx.shadowBlur = 0;
-    subBaseline -= Math.round(sSize * 1.3);
+// ---- Title block geometry -------------------------------------------
+// Computed once per render so callout chips can steer clear of the
+// tagline ribbon in the overlap layouts.
+function titleMetrics(W, H, zones, state) {
+  const probe = document.createElement('canvas').getContext('2d');
+  const m = { mode: zones.bed ? 'bed' : 'overlap' };
+  if (m.mode === 'bed') {
+    const bed = zones.bed;
+    m.titleSize = fitSize(probe, state.caption, 'Anton', 400, bed.h * 0.5, W * 0.93);
+    m.titleBaseline = bed.y + bed.h * 0.52;
+    m.subtitleSize = bed.h * 0.155;
+    m.subtitleBaseline = bed.y + bed.h * 0.72;
+    m.ribbonH = bed.h * 0.145;
+    m.ribbonY = bed.y + bed.h * 0.8;
   } else {
-    subBaseline -= Math.round(H * 0.03);
-  }
-
-  // The title itself: chrome retro-stripe fill, dark outline, light keyline.
-  if (title) {
-    let tSize = fitFont(ctx, title, 'Anton, sans-serif', bedTop != null ? Math.round(bedH * 0.62) : Math.round(H * 0.2), W * 0.94, 0.02);
-    if (bedTop != null) {
-      // Shrink until the cap top, outline included, clears the bed's top.
-      while (tSize > 30 && subBaseline - Math.round(tSize * 0.1) - tSize * 0.84 < bedTop + Math.round(bedH * 0.03)) {
-        tSize -= 4;
-      }
+    const credTop = zones.credits ? zones.credits.y : H;
+    m.titleSize = fitSize(probe, state.caption, 'Anton', 400, H * 0.215, W * 0.7);
+    m.titleBaseline = H * 0.7;
+    m.subtitleSize = H * 0.05;
+    m.subtitleBaseline = m.titleBaseline + m.titleSize * 0.47;
+    m.ribbonH = H * 0.043;
+    m.ribbonY = m.subtitleBaseline + H * 0.008;
+    if (m.ribbonY + m.ribbonH > credTop - H * 0.006) {
+      // Very short canvases: pull the whole stack up rather than
+      // letting the ribbon fall into the credits strip.
+      const shift = m.ribbonY + m.ribbonH - (credTop - H * 0.006);
+      m.titleBaseline -= shift;
+      m.subtitleBaseline -= shift;
+      m.ribbonY -= shift;
     }
-    ctx.save();
-    ctx.translate(Math.round(W / 2), 0);
-    ctx.font = `400 ${tSize}px Anton, sans-serif`;
-    ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-    const baseline = subBaseline - Math.round(tSize * 0.1);
-    ctx.fillStyle = 'rgba(12, 4, 24, 0.55)';
-    ctx.fillText(title, Math.round(tSize * 0.035), baseline + Math.round(tSize * 0.05));
-    ctx.lineWidth = Math.max(4, tSize * 0.11);
-    ctx.strokeStyle = '#170826';
-    ctx.lineJoin = 'round';
-    ctx.strokeText(title, 0, baseline);
-    const grad = ctx.createLinearGradient(0, baseline - tSize * 0.78, 0, baseline + tSize * 0.22);
-    grad.addColorStop(0, '#ffe98a');
-    grad.addColorStop(0.36, '#ffb03a');
-    grad.addColorStop(0.56, '#ff7a3d');
-    grad.addColorStop(0.76, '#ff3d8a');
-    grad.addColorStop(1, '#8a3dff');
-    ctx.fillStyle = grad;
-    ctx.fillText(title, 0, baseline);
-    ctx.lineWidth = Math.max(1.5, tSize * 0.014);
-    ctx.strokeStyle = 'rgba(255, 246, 214, 0.9)';
-    ctx.strokeText(title, 0, baseline);
-    try { ctx.letterSpacing = '0px'; } catch { /* nothing to reset */ }
-    ctx.restore();
   }
+  probe.font = `400 ${m.ribbonH * 0.48}px Anton`;
+  spacing(probe, m.ribbonH * 0.48 * 0.3);
+  const tagW = probe.measureText('THE CITY PAYS IN SUNSETS').width;
+  noSpacing(probe);
+  m.ribbonW = Math.min(W * 0.62, tagW + m.ribbonH * 1.6);
+  m.ribbonX = (W - m.ribbonW) / 2;
+  return m;
 }
 
-function paintPillBug(ctx, W, H, x, y) {
-  ctx.save();
-  const bh = Math.round(H * 0.04);
-  ctx.font = `400 ${Math.round(bh * 0.52)}px Anton, sans-serif`;
-  const bw = Math.round(ctx.measureText('SALTLINE').width + bh * 0.9);
-  ctx.fillStyle = 'rgba(14,8,28,0.88)';
-  ctx.beginPath(); ctx.roundRect(x, y, bw, bh, bh / 2); ctx.fill();
-  ctx.strokeStyle = '#ffb03a'; ctx.lineWidth = Math.max(2, bh * 0.05); ctx.stroke();
-  ctx.fillStyle = '#ffd98a';
-  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillText('SALTLINE', x + bw / 2, y + bh / 2 + 1);
-  ctx.restore();
+// ---- Furniture pieces ------------------------------------------------
+
+function paintMasthead(ctx, zone, W) {
+  const { y, h } = zone;
+  const grad = ctx.createLinearGradient(0, y, 0, y + h);
+  grad.addColorStop(0, '#1d0f3d');
+  grad.addColorStop(1, '#120826');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, y, W, h);
+  // Five gold stars.
+  const r = h * 0.3;
+  let sx = W * 0.026 + r;
+  ctx.fillStyle = '#f5b921';
+  for (let i = 0; i < 5; i++) {
+    star(ctx, sx, y + h * 0.47, r);
+    ctx.fill();
+    sx += r * 2.45;
+  }
+  // The pull-quote and its attribution.
+  const quoteSize = h * 0.4;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillStyle = CREAM;
+  const qSize = fitSize(ctx, 'THE HOTTEST SUMMER ON RECORD', 'Anton', 400, quoteSize, W * 0.44);
+  spacing(ctx, qSize * 0.06);
+  ctx.font = `400 ${qSize}px Anton`;
+  ctx.fillText('THE HOTTEST SUMMER ON RECORD', sx + W * 0.012, y + h * 0.47);
+  const attrSize = h * 0.185;
+  ctx.font = `400 ${attrSize}px Anton`;
+  spacing(ctx, attrSize * 0.34);
+  ctx.fillStyle = '#d9b26a';
+  ctx.fillText('THE SALTLINE GAZETTE', sx + W * 0.012, y + h * 0.76);
+  noSpacing(ctx);
+  // VOL. 1 chip on the right.
+  const chipH = h * 0.52;
+  const chipSize = h * 0.3;
+  ctx.font = `400 ${chipSize}px Anton`;
+  spacing(ctx, chipSize * 0.08);
+  const chipW = ctx.measureText('VOL. 1').width + chipSize * 1.1;
+  const chipX = W - W * 0.024 - chipW;
+  const chipY = y + (h - chipH) / 2;
+  ctx.strokeStyle = GOLD;
+  ctx.lineWidth = Math.max(1.5, h * 0.022);
+  rr(ctx, chipX, chipY, chipW, chipH, chipH * 0.28);
+  ctx.stroke();
+  ctx.fillStyle = CREAM;
+  ctx.textAlign = 'center';
+  ctx.fillText('VOL. 1', chipX + chipW / 2, chipY + chipH * 0.68);
+  ctx.textAlign = 'left';
+  noSpacing(ctx);
+  // Gold rule under the band.
+  ctx.fillStyle = GOLD;
+  ctx.fillRect(0, y + h - Math.max(2, h * 0.035), W, Math.max(2, h * 0.035));
 }
 
-function paintVignetteAndGrain(ctx, W, H) {
-  const v = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.36, W / 2, H / 2, Math.max(W, H) * 0.78);
-  v.addColorStop(0, 'rgba(0,0,0,0)');
-  v.addColorStop(1, 'rgba(8,4,18,0.38)');
-  ctx.fillStyle = v; ctx.fillRect(0, 0, W, H);
-  // Deterministic grain: a fixed-seed pattern, identical on every render.
+function paintBed(ctx, bed) {
+  const grad = ctx.createLinearGradient(0, bed.y, 0, bed.y + bed.h);
+  grad.addColorStop(0, '#2a0a4a');
+  grad.addColorStop(0.55, '#6d1668');
+  grad.addColorStop(1, '#b81f6d');
+  ctx.fillStyle = grad;
+  ctx.fillRect(bed.x, bed.y, bed.w, bed.h);
+  // A soft sun disc glowing behind the lettering.
+  const sun = ctx.createRadialGradient(
+    bed.w * 0.34, bed.y + bed.h * 0.42, 0,
+    bed.w * 0.34, bed.y + bed.h * 0.42, bed.h * 0.66,
+  );
+  sun.addColorStop(0, 'rgba(255,170,90,0.55)');
+  sun.addColorStop(1, 'rgba(255,170,90,0)');
+  ctx.fillStyle = sun;
+  ctx.fillRect(bed.x, bed.y, bed.w, bed.h);
+  // Gold rule along the top of the bed.
+  ctx.fillStyle = GOLD;
+  ctx.fillRect(bed.x, bed.y, bed.w, Math.max(2, bed.h * 0.008));
+}
+
+function paintTitleBlock(ctx, state, m, W) {
+  // Chrome-stripe title.
+  const titleTop = m.titleBaseline - m.titleSize * 0.74;
+  const grad = ctx.createLinearGradient(0, titleTop, 0, m.titleBaseline + m.titleSize * 0.08);
+  grad.addColorStop(0, '#fff3b0');
+  grad.addColorStop(0.27, '#ffd23e');
+  grad.addColorStop(0.44, '#ff9a2e');
+  grad.addColorStop(0.57, '#ff5e62');
+  grad.addColorStop(0.71, '#ff2e88');
+  grad.addColorStop(0.87, '#a83df0');
+  grad.addColorStop(1, '#6a3df0');
+  ctx.font = `400 ${m.titleSize}px Anton`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'alphabetic';
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = '#160a28';
+  ctx.lineWidth = m.titleSize * 0.17;
+  ctx.strokeText(state.caption, W / 2, m.titleBaseline);
+  ctx.fillStyle = grad;
+  ctx.fillText(state.caption, W / 2, m.titleBaseline);
+  ctx.strokeStyle = 'rgba(255,246,214,0.9)';
+  ctx.lineWidth = Math.max(1.2, m.titleSize * 0.016);
+  ctx.strokeText(state.caption, W / 2, m.titleBaseline);
+  // Neon script subtitle.
+  ctx.font = `400 ${m.subtitleSize}px Pacifico`;
+  ctx.shadowColor = '#ff4d9d';
+  ctx.shadowBlur = m.subtitleSize * 0.5;
+  ctx.fillStyle = '#ff77b7';
+  ctx.fillText(state.subtitle, W / 2, m.subtitleBaseline);
+  ctx.fillText(state.subtitle, W / 2, m.subtitleBaseline);
+  ctx.shadowBlur = 0;
+  // Tagline ribbon.
+  ctx.fillStyle = 'rgba(14,6,28,0.94)';
+  ctx.strokeStyle = GOLD;
+  ctx.lineWidth = Math.max(1.5, m.ribbonH * 0.05);
+  rr(ctx, m.ribbonX, m.ribbonY, m.ribbonW, m.ribbonH, m.ribbonH * 0.3);
+  ctx.fill();
+  ctx.stroke();
+  const tagSize = m.ribbonH * 0.48;
+  ctx.font = `400 ${tagSize}px Anton`;
+  spacing(ctx, tagSize * 0.3);
+  ctx.fillStyle = CREAM;
+  ctx.fillText('THE CITY PAYS IN SUNSETS', W / 2, m.ribbonY + m.ribbonH * 0.68);
+  noSpacing(ctx);
+  ctx.textAlign = 'left';
+}
+
+function paintCredits(ctx, zone, W) {
+  const { y, h } = zone;
+  ctx.fillStyle = INK;
+  ctx.fillRect(0, y, W, h);
+  ctx.fillStyle = GOLD;
+  ctx.fillRect(0, y, W, Math.max(2, h * 0.045));
+  ctx.textBaseline = 'alphabetic';
+  ctx.textAlign = 'left';
+  // Coming soon, left.
+  const soonSize = h * 0.34;
+  ctx.font = `400 ${soonSize}px Anton`;
+  spacing(ctx, soonSize * 0.22);
+  ctx.fillStyle = '#f3d9a0';
+  ctx.fillText('COMING SOON', W * 0.024, y + h * 0.66);
+  noSpacing(ctx);
+  // Billing block, centre, two small lines.
+  const lineSize = h * 0.2;
+  ctx.font = `700 ${lineSize}px 'Arial Narrow', Arial, sans-serif`;
+  spacing(ctx, lineSize * 0.16);
+  ctx.fillStyle = 'rgba(240,230,210,0.82)';
+  ctx.textAlign = 'center';
+  ctx.fillText('A SALTLINE PICTURES PRODUCTION · STARRING YOU', W / 2, y + h * 0.4);
+  ctx.fillText('SHOT ON YOUR OWN CAMERA · GRADED BY HAND', W / 2, y + h * 0.72);
+  noSpacing(ctx);
+  ctx.textAlign = 'left';
+  // Seal: a gold starburst at the far right.
+  const sealR = h * 0.42;
+  const sealCx = W - W * 0.02 - sealR;
+  const sealCy = y + h * 0.54;
+  ctx.beginPath();
+  const spikes = 20;
+  for (let i = 0; i < spikes * 2; i++) {
+    const rad = i % 2 === 0 ? sealR : sealR * 0.8;
+    const a = (i * Math.PI) / spikes - Math.PI / 2;
+    const px = sealCx + Math.cos(a) * rad;
+    const py = sealCy + Math.sin(a) * rad;
+    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+  }
+  ctx.closePath();
+  ctx.fillStyle = '#f5b921';
+  ctx.fill();
+  ctx.strokeStyle = '#7a5200';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  ctx.fillStyle = '#4a2c00';
+  ctx.textAlign = 'center';
+  const sealText = Math.max(4, sealR * 0.3);
+  ctx.font = `700 ${sealText}px Arial, sans-serif`;
+  ctx.fillText('ORIGINAL', sealCx, sealCy - sealText * 0.12);
+  ctx.fillText('COVER ART', sealCx, sealCy + sealText * 0.95);
+  // Barcode to the seal's left: white block, seeded bars, tiny digits.
+  const bw = W * 0.052;
+  const bh = h * 0.56;
+  const bx = sealCx - sealR - W * 0.012 - bw;
+  const by = y + h * 0.24;
+  ctx.fillStyle = '#f4f1e8';
+  ctx.fillRect(bx, by, bw, bh);
+  ctx.fillStyle = '#14100c';
   let seed = 1234567;
-  const rand = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
-  ctx.fillStyle = 'rgba(255,255,255,0.045)';
-  const dots = Math.round((W * H) / 9000);
-  for (let i = 0; i < dots; i++) ctx.fillRect(rand() * W, rand() * H, 1.3, 1.3);
-  ctx.fillStyle = 'rgba(0,0,0,0.055)';
-  for (let i = 0; i < dots; i++) ctx.fillRect(rand() * W, rand() * H, 1.3, 1.3);
+  const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+  let bxPos = bx + bw * 0.06;
+  while (bxPos < bx + bw * 0.9) {
+    const barW = (0.4 + rnd() * 1.6) * (bw / 42);
+    if (rnd() > 0.42) ctx.fillRect(bxPos, by + bh * 0.06, barW, bh * 0.76);
+    bxPos += barW + bw / 42;
+  }
+  if (h > 40) {
+    ctx.font = `${Math.max(5, h * 0.13)}px Arial, sans-serif`;
+    ctx.fillStyle = 'rgba(240,230,210,0.75)';
+    ctx.fillText('8 991234 567890', bx + bw / 2, y + h * 0.95);
+  }
+  ctx.textAlign = 'left';
 }
 
-// renderCover(canvas, state)
-// state: { layout, grade, caption, subtitle, tagline, posterInk, halftone,
-//          furniture, callouts,
-//          photos: [{img, key, name}],
-//          panels: [{photoIndex, zoom, ox, oy, smart, label}] }
-export function renderCover(canvas, state) {
+function paintCallout(ctx, rect, label, W, H, ribbon) {
+  if (!label) return;
+  const chipH = Math.max(15, Math.min(rect.h * 0.1, H * 0.036));
+  const fontSize = chipH * 0.52;
+  ctx.font = `400 ${fontSize}px Anton`;
+  spacing(ctx, fontSize * 0.05);
+  const textW = ctx.measureText(label).width;
+  noSpacing(ctx);
+  const chipW = textW + fontSize * 1.7;
+  const slant = chipH * 0.3;
+  const x = rect.x + W * 0.006;
+  let y = rect.y + rect.h - chipH - rect.h * 0.04;
+  // In the overlap layouts, a chip that would slide under the tagline
+  // ribbon is lifted clear of it instead.
+  if (ribbon && x < ribbon.x + ribbon.w && x + chipW > ribbon.x && y + chipH > ribbon.y) {
+    y = Math.min(y, ribbon.y - chipH - H * 0.006);
+  }
+  ctx.beginPath();
+  ctx.moveTo(x + slant, y);
+  ctx.lineTo(x + chipW, y);
+  ctx.lineTo(x + chipW - slant, y + chipH);
+  ctx.lineTo(x, y + chipH);
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(15,7,30,0.9)';
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(217,164,65,0.65)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  ctx.fillStyle = '#f5b921';
+  ctx.fillRect(x + slant * 0.55, y + chipH * 0.2, Math.max(3, chipH * 0.1), chipH * 0.6);
+  ctx.font = `400 ${fontSize}px Anton`;
+  spacing(ctx, fontSize * 0.05);
+  ctx.fillStyle = '#ffffff';
+  ctx.textAlign = 'left';
+  ctx.fillText(label, x + slant * 0.55 + chipH * 0.32, y + chipH * 0.7);
+  noSpacing(ctx);
+}
+
+function paintPill(ctx, panelRect, W, H) {
+  const size = H * 0.02;
+  ctx.font = `400 ${size}px Anton`;
+  spacing(ctx, size * 0.14);
+  const tw = ctx.measureText('SALTLINE').width;
+  noSpacing(ctx);
+  const pw = tw + size * 1.5;
+  const ph = size * 1.6;
+  const x = panelRect.x + W * 0.008;
+  const y = panelRect.y + H * 0.01;
+  ctx.fillStyle = 'rgba(13,6,28,0.85)';
+  ctx.strokeStyle = GOLD;
+  ctx.lineWidth = 1.5;
+  rr(ctx, x, y, pw, ph, ph / 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.font = `400 ${size}px Anton`;
+  spacing(ctx, size * 0.14);
+  ctx.fillStyle = '#ffd98a';
+  ctx.textAlign = 'center';
+  ctx.fillText('SALTLINE', x + pw / 2, y + ph * 0.7);
+  noSpacing(ctx);
+  ctx.textAlign = 'left';
+}
+
+// ---- The cover itself -------------------------------------------------
+
+export function renderCover(canvas, state, opts = {}) {
   const ctx = canvas.getContext('2d');
-  const W = canvas.width, H = canvas.height;
-  ctx.fillStyle = '#160b2a';
+  const W = canvas.width;
+  const H = canvas.height;
+  const gradeId = state.grade === 'auto' ? (state.resolvedGrade || 'key-art') : state.grade;
+  const zones = layoutZones(state.layout, W, H, state.furniture);
+  const photosById = new Map(state.photos.map((p) => [p.id, p]));
+
+  ctx.fillStyle = '#14092b';
   ctx.fillRect(0, 0, W, H);
-  const hero = state.photos[state.panels[0]?.photoIndex || 0]?.img || state.photos[0]?.img || null;
-  const gradeId = resolveGradeId(state.grade, hero);
-  const lut = lutForGrade(gradeId);
-  const rects = getPanelRects(state.layout, W, H);
-  canvas._panelRects = rects;
-  const zones = furnitureZones(state.layout, W, H);
-  const margin = Math.round(Math.min(W, H) * 0.03);
-  const thinFrame = POSTER_LAYOUTS.includes(state.layout);
-  const callouts = [];
-  rects.forEach((panelRect, i) => {
-    const ps = state.panels[i] || { photoIndex: i % Math.max(1, state.photos.length), zoom: 1, ox: 0, oy: 0, smart: true };
-    const photo = state.photos[ps.photoIndex] || state.photos[0];
-    paintPanel(ctx, photo ? photo.img : null, panelRect, ps, lut, { posterInk: state.posterInk, halftone: state.halftone, gradeId, thinFrame, W, H });
-    if (state.callouts) callouts.push([panelRect, ps.label || defaultLabelFor(photo), i]);
+
+  // Photo panels.
+  zones.panels.forEach((rect, i) => {
+    const panelState = state.panels[i];
+    const photo = panelState ? photosById.get(panelState.photoId) : null;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(rect.x, rect.y, rect.w, rect.h);
+    ctx.clip();
+    if (photo && photo.img) {
+      const src = gradedCopy(photo, gradeId);
+      const r = panelSourceRect(photo, panelState, rect.w / rect.h);
+      const k = src.width / photo.img.naturalWidth;
+      ctx.drawImage(src, r.sx * k, r.sy * k, r.sw * k, r.sh * k, rect.x, rect.y, rect.w, rect.h);
+    } else {
+      const g = ctx.createLinearGradient(rect.x, rect.y, rect.x + rect.w, rect.y + rect.h);
+      g.addColorStop(0, '#2a1650');
+      g.addColorStop(1, '#180b33');
+      ctx.fillStyle = g;
+      ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+      ctx.fillStyle = 'rgba(255,233,196,0.5)';
+      ctx.font = `400 ${Math.max(11, H * 0.016)}px Anton`;
+      ctx.textAlign = 'center';
+      ctx.fillText('ADD A PHOTO', rect.x + rect.w / 2, rect.y + rect.h / 2);
+      ctx.textAlign = 'left';
+    }
+    ctx.restore();
+    // Frame: a fine cream keyline inside a dark edge.
+    ctx.strokeStyle = 'rgba(8,3,20,0.9)';
+    ctx.lineWidth = Math.max(2, W * 0.0022);
+    ctx.strokeRect(rect.x, rect.y, rect.w, rect.h);
+    ctx.strokeStyle = 'rgba(255,238,205,0.85)';
+    ctx.lineWidth = Math.max(1.2, W * 0.0012);
+    ctx.strokeRect(rect.x + ctx.lineWidth, rect.y + ctx.lineWidth, rect.w - ctx.lineWidth * 2, rect.h - ctx.lineWidth * 2);
   });
 
-  const furniture = state.furniture !== false;
-  const creditsTop = furniture && zones.creditsH > 0 ? H - zones.creditsH : H;
-  // Layouts with a title bed (poster, ensemble) get the designed sunset bed
-  // under their panels; the title stack lives entirely inside it.
-  const bedTop = zones.titleBedH > 0 ? zones.bottom : null;
-  if (bedTop != null) paintTitleBed(ctx, W, bedTop, creditsTop);
-  paintVignetteAndGrain(ctx, W, H);
-
-  if (bedTop == null) {
-    // Soft shade behind the title block so type stays readable on busy photos.
-    const shadeTop = creditsTop - Math.round(H * 0.42);
-    const shade = ctx.createLinearGradient(0, shadeTop, 0, creditsTop);
-    shade.addColorStop(0, 'rgba(10,5,22,0)');
-    shade.addColorStop(1, 'rgba(10,5,22,0.5)');
-    ctx.fillStyle = shade; ctx.fillRect(0, shadeTop, W, creditsTop - shadeTop);
+  if (state.furniture) {
+    const m = titleMetrics(W, H, zones, state);
+    if (zones.bed) paintBed(ctx, zones.bed);
+    if (zones.masthead) paintMasthead(ctx, zones.masthead, W);
+    // The SALTLINE pill sits on the top-left panel.
+    if (zones.panels.length) {
+      const tl = zones.panels.reduce((a, b) => (b.x < a.x || (b.x === a.x && b.y < a.y) ? b : a), zones.panels[0]);
+      paintPill(ctx, tl, W, H);
+    }
+    if (state.callouts) {
+      const ribbon = m.mode === 'overlap'
+        ? { x: m.ribbonX, y: m.ribbonY, w: m.ribbonW, h: m.ribbonH }
+        : null;
+      zones.panels.forEach((rect, i) => {
+        const panelState = state.panels[i];
+        if (panelState) paintCallout(ctx, rect, panelState.label, W, H, ribbon);
+      });
+    }
+    paintTitleBlock(ctx, state, m, W);
+    if (zones.credits) paintCredits(ctx, zones.credits, W);
   }
 
-  paintTitleBlock(ctx, W, H, state, creditsTop, bedTop);
-  if (furniture && zones.mastH > 0) paintMasthead(ctx, W, H, zones.mastH, margin);
-  if (furniture && zones.creditsH > 0) paintCredits(ctx, W, H, zones.creditsH, margin);
-  // The SALTLINE pill bug: top-left, just under the masthead when present.
-  const pillY = furniture && zones.mastH > 0 ? zones.mastH + Math.round(H * 0.014) : Math.round(H * 0.026);
-  paintPillBug(ctx, W, H, margin, pillY);
-  // Callout chips paint last, like stickers over the finished poster, so a
-  // chip at a panel's bottom corner stays readable where the title block
-  // overlaps that corner. On the wide Key Art cover the hero chip rides up
-  // a touch so the tagline ribbon never clips its bottom edge.
-  const heroRibTop = state.layout === 'keyart' && (state.tagline || '').trim()
-    ? creditsTop - Math.round(H * 0.016) - Math.round(H * 0.047)
-    : null;
-  for (const [panelRect, label, i] of callouts) {
-    paintCallout(ctx, panelRect, label, H, heroRibTop != null && i === 0 ? heroRibTop - 6 : null);
+  // Editor selection outline.
+  if (opts.selected != null && zones.panels[opts.selected]) {
+    const r = zones.panels[opts.selected];
+    ctx.strokeStyle = '#ff8a3d';
+    ctx.lineWidth = Math.max(2.5, W * 0.0026);
+    ctx.strokeRect(r.x - 3, r.y - 3, r.w + 6, r.h + 6);
   }
-  return { gradeId, panelCount: rects.length };
+  canvas._zones = zones;
+  return zones;
 }

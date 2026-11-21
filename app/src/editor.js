@@ -1,85 +1,79 @@
-// editor.js — Wiring for the Saltline editor UI.
-// Owns the cover state, loads the bundled sample photos, handles photo
-// intake (file picker and drag & drop), panel selection and dragging,
-// per-panel character labels, undo/redo, the one-click Auto Cover, and
-// every control in the toolbar. Any change re-renders the live preview.
+// editor.js — The Saltline editor: state, photo intake and every
+// control in the sidebar.
+//
+// State is one plain object. Panels are rebuilt from the layout's
+// defaults whenever the arrangement changes; each panel remembers its
+// photo, its callout label, whether the smart crop drives it, and a
+// manual zoom/offset on top of the crop. Undo/redo snapshot the whole
+// state as JSON, which keeps the history logic boring and reliable.
 
-import { LAYOUTS, LAYOUT_CAST, panelCount } from './panels.js';
-import { GRADES } from './grades.js';
-import { EXPORT_SIZES, renderCover, sizeById, defaultLabelFor } from './render.js';
+import { LAYOUTS, layoutZones } from './panels.js';
+import { GRADES, pickAutoGrade } from './grades.js';
+import { renderCover, sizeById } from './render.js';
 
-export const SAMPLE_PHOTOS = [
-  { key: 'driver', name: 'Driver', src: 'samples/driver.jpg' },
-  { key: 'redhead', name: 'Redhead', src: 'samples/redhead.jpg' },
-  { key: 'rider', name: 'Rider', src: 'samples/rider.jpg' },
-  { key: 'marina', name: 'Marina', src: 'samples/marina.jpg' },
-  { key: 'pier', name: 'Pier', src: 'samples/pier.jpg' },
-  { key: 'rooftop', name: 'Rooftop', src: 'samples/rooftop.jpg' },
-  { key: 'neon', name: 'Neon', src: 'samples/neon.jpg' },
-  { key: 'motel', name: 'Motel', src: 'samples/motel.jpg' },
+export const SAMPLES = [
+  { id: 'driver', name: 'Driver', file: 'samples/driver.jpg' },
+  { id: 'redhead', name: 'Redhead', file: 'samples/redhead.jpg' },
+  { id: 'rider', name: 'Rider', file: 'samples/rider.jpg' },
+  { id: 'marina', name: 'Marina', file: 'samples/marina.jpg' },
+  { id: 'pier', name: 'Pier', file: 'samples/pier.jpg' },
+  { id: 'rooftop', name: 'Rooftop', file: 'samples/rooftop.jpg' },
+  { id: 'neon', name: 'Neon', file: 'samples/neon.jpg' },
+  { id: 'motel', name: 'Motel', file: 'samples/motel.jpg' },
 ];
+
+// The cast list: each bundled photo's callout label on the poster.
+export const DEFAULT_LABELS = {
+  driver: 'THE DRIVER',
+  pier: 'THE CAPTAIN',
+  redhead: 'THE FIXER',
+  rider: 'THE RIDER',
+  marina: 'THE INSIDER',
+  rooftop: 'THE BOSS',
+  neon: 'THE COURIERS',
+  motel: 'THE HIDEOUT',
+};
 
 export function createState() {
   return {
     layout: 'keyart',
     grade: 'key-art',
+    resolvedGrade: 'key-art',
     caption: 'NEON SHORES',
     subtitle: 'Saltline City',
-    tagline: 'THE CITY PAYS IN SUNSETS',
-    posterInk: true,
-    halftone: false,
     furniture: true,
     callouts: true,
-    size: '1920x1080',
     photos: [],
     panels: [],
-    selectedPanel: 0,
-    selectedPhoto: 0,
+    selected: 0,
+    _builtFor: null,
   };
 }
 
-function photoIndexByKey(state, key) {
-  const i = state.photos.findIndex((p) => p.key === key);
-  return i >= 0 ? i : 0;
-}
-
-// assignCast(state) — reset every panel to the layout's default cast,
-// smart crop on, framing centred, labels back to the cast defaults.
-export function assignCast(state) {
-  const cast = LAYOUT_CAST[state.layout] || [];
-  state.panels = cast.map((key) => ({
-    photoIndex: state.photos.length ? photoIndexByKey(state, key) : 0,
-    zoom: 1, ox: 0, oy: 0, smart: true, label: '',
+export function ensurePanels(state, force = false) {
+  if (!force && state._builtFor === state.layout && state.panels.length) return;
+  const zones = layoutZones(state.layout, 1000, 1000, true);
+  state.panels = zones.panels.map((p) => ({
+    photoId: p.photo,
+    label: DEFAULT_LABELS[p.photo] || '',
+    smart: true,
+    zoom: 1,
+    dx: 0,
+    dy: 0,
   }));
-  if (!state.panels.length) {
-    state.panels = [{ photoIndex: 0, zoom: 1, ox: 0, oy: 0, smart: true, label: '' }];
-  }
-  if (state.selectedPanel >= state.panels.length) state.selectedPanel = 0;
-}
-
-export function ensurePanels(state) {
-  const n = panelCount(state.layout);
-  if (state.panels.length !== n) assignCast(state);
-  if (state.selectedPanel >= state.panels.length) state.selectedPanel = 0;
-}
-
-export function loadImageFromUrl(url) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = reject;
-    img.src = url;
-  });
+  state._builtFor = state.layout;
+  if (state.selected >= state.panels.length) state.selected = 0;
 }
 
 export async function loadSamplePhotos(state) {
-  for (const sample of SAMPLE_PHOTOS) {
-    try {
-      const img = await loadImageFromUrl(sample.src);
-      state.photos.push({ img, name: sample.name, key: sample.key });
-    } catch { /* a missing sample simply never becomes assignable */ }
-  }
-  assignCast(state);
+  const loaded = await Promise.all(SAMPLES.map(async (s) => {
+    const img = new Image();
+    img.src = s.file;
+    await img.decode();
+    return { id: s.id, name: s.name, img };
+  }));
+  state.photos = loaded.concat(state.photos.filter((p) => p.custom));
+  return state.photos;
 }
 
 function fillSelect(select, items, value) {
@@ -87,222 +81,269 @@ function fillSelect(select, items, value) {
   select.innerHTML = '';
   for (const item of items) {
     const opt = document.createElement('option');
-    opt.value = item.id; opt.textContent = item.label;
+    opt.value = item.id;
+    opt.textContent = item.label;
     select.appendChild(opt);
   }
   select.value = value;
 }
 
-export function initEditor(state, els, onChange) {
-  // --- Undo / redo -------------------------------------------------------
+export function initEditor(state, els, opts = {}) {
+  const canvas = els.canvas;
+  let zones = null;
   const undoStack = [];
   const redoStack = [];
-  const snapshot = () => JSON.stringify({
-    layout: state.layout, grade: state.grade, caption: state.caption,
-    subtitle: state.subtitle, tagline: state.tagline, posterInk: state.posterInk,
-    halftone: state.halftone, furniture: state.furniture, callouts: state.callouts,
-    size: state.size, panels: state.panels, selectedPanel: state.selectedPanel,
-    selectedPhoto: state.selectedPhoto,
-  });
-  const restore = (snap) => {
-    const s = JSON.parse(snap);
+  let userCount = 0;
+
+  const photoById = (id) => state.photos.find((p) => p.id === id);
+  const heroPhoto = () => {
+    const first = state.panels[0];
+    return first ? photoById(first.photoId) : state.photos[0];
+  };
+
+  function resolveAuto() {
+    if (state.grade !== 'auto') return;
+    const hero = heroPhoto();
+    if (hero) state.resolvedGrade = pickAutoGrade(hero);
+  }
+
+  function snapshot() {
+    return JSON.stringify({
+      layout: state.layout, grade: state.grade, resolvedGrade: state.resolvedGrade,
+      caption: state.caption, subtitle: state.subtitle,
+      furniture: state.furniture, callouts: state.callouts,
+      panels: state.panels, selected: state.selected,
+    });
+  }
+
+  function restore(json) {
+    const s = JSON.parse(json);
     Object.assign(state, s);
+    state._builtFor = state.layout;
     syncControls();
-    render();
-  };
-  const beginChange = () => {
+    update();
+  }
+
+  function pushHistory() {
     undoStack.push(snapshot());
-    if (undoStack.length > 60) undoStack.shift();
+    if (undoStack.length > 80) undoStack.shift();
     redoStack.length = 0;
-  };
-  if (els.undoBtn) els.undoBtn.addEventListener('click', () => {
+  }
+
+  function update() {
+    resolveAuto();
+    zones = renderCover(canvas, state, opts.shot ? {} : { selected: state.selected });
+    syncSelectionControls();
+    refreshStrip();
+  }
+
+  function syncSelectionControls() {
+    const panel = state.panels[state.selected];
+    if (!panel) return;
+    if (els.panelLabel) els.panelLabel.textContent = `Panel ${state.selected + 1} of ${state.panels.length}`;
+    if (els.calloutLabel && document.activeElement !== els.calloutLabel) els.calloutLabel.value = panel.label || '';
+    if (els.zoom) els.zoom.value = panel.zoom;
+    if (els.smartCrop) els.smartCrop.checked = panel.smart;
+  }
+
+  function syncControls() {
+    if (els.layout) els.layout.value = state.layout;
+    if (els.grade) els.grade.value = state.grade;
+    if (els.caption) els.caption.value = state.caption;
+    if (els.subtitle) els.subtitle.value = state.subtitle;
+    if (els.furniture) els.furniture.checked = state.furniture;
+    if (els.callouts) els.callouts.checked = state.callouts;
+    syncSelectionControls();
+  }
+
+  function refreshStrip() {
+    if (!els.photoStrip) return;
+    const panel = state.panels[state.selected];
+    els.photoStrip.innerHTML = '';
+    for (const photo of state.photos) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'chip' + (panel && panel.photoId === photo.id ? ' active' : '');
+      btn.textContent = photo.name;
+      btn.addEventListener('click', () => assignPhoto(photo));
+      els.photoStrip.appendChild(btn);
+    }
+  }
+
+  function assignPhoto(photo) {
+    const panel = state.panels[state.selected];
+    if (!panel) return;
+    panel.photoId = photo.id;
+    panel.label = DEFAULT_LABELS[photo.id] || (photo.custom ? photo.name.toUpperCase() : panel.label);
+    pushHistory();
+    update();
+  }
+
+  function addPhotoFiles(files) {
+    for (const file of files) {
+      if (!file.type || !file.type.startsWith('image/')) continue;
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      img.onload = () => {
+        userCount += 1;
+        const photo = {
+          id: `user-${userCount}`,
+          name: file.name.replace(/\.[^.]+$/, '') || `Photo ${userCount}`,
+          img,
+          custom: true,
+        };
+        state.photos.push(photo);
+        assignPhoto(photo);
+      };
+      img.src = url;
+    }
+  }
+
+  // ---- Controls ------------------------------------------------------
+  fillSelect(els.layout, LAYOUTS, state.layout);
+  fillSelect(els.grade, [{ id: 'auto', label: 'Auto (fits photo)' }, ...GRADES], state.grade);
+
+  els.layout?.addEventListener('change', () => {
+    state.layout = els.layout.value;
+    ensurePanels(state);
+    state.selected = 0;
+    pushHistory();
+    update();
+  });
+  els.grade?.addEventListener('change', () => {
+    state.grade = els.grade.value;
+    resolveAuto();
+    pushHistory();
+    update();
+  });
+  els.caption?.addEventListener('input', () => { state.caption = els.caption.value; update(); });
+  els.caption?.addEventListener('change', pushHistory);
+  els.subtitle?.addEventListener('input', () => { state.subtitle = els.subtitle.value; update(); });
+  els.subtitle?.addEventListener('change', pushHistory);
+  els.calloutLabel?.addEventListener('input', () => {
+    const panel = state.panels[state.selected];
+    if (panel) { panel.label = els.calloutLabel.value; update(); }
+  });
+  els.calloutLabel?.addEventListener('change', pushHistory);
+  els.furniture?.addEventListener('change', () => { state.furniture = els.furniture.checked; pushHistory(); update(); });
+  els.callouts?.addEventListener('change', () => { state.callouts = els.callouts.checked; pushHistory(); update(); });
+  els.smartCrop?.addEventListener('change', () => {
+    const panel = state.panels[state.selected];
+    if (panel) { panel.smart = els.smartCrop.checked; pushHistory(); update(); }
+  });
+  els.zoom?.addEventListener('input', () => {
+    const panel = state.panels[state.selected];
+    if (panel) { panel.zoom = Number(els.zoom.value); update(); }
+  });
+  els.zoom?.addEventListener('change', pushHistory);
+  els.undoBtn?.addEventListener('click', () => {
     if (!undoStack.length) return;
     redoStack.push(snapshot());
     restore(undoStack.pop());
   });
-  if (els.redoBtn) els.redoBtn.addEventListener('click', () => {
+  els.redoBtn?.addEventListener('click', () => {
     if (!redoStack.length) return;
     undoStack.push(snapshot());
     restore(redoStack.pop());
   });
-
-  const render = () => { ensurePanels(state); renderCover(els.canvas, state); if (onChange) onChange(state); };
-
-  const refreshPhotoStrip = () => {
-    els.photoStrip.innerHTML = '';
-    state.photos.forEach((photo, i) => {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'thumb' + (i === state.selectedPhoto ? ' active' : '');
-      btn.textContent = photo.name;
-      btn.addEventListener('click', () => {
-        beginChange();
-        state.selectedPhoto = i;
-        const panel = state.panels[state.selectedPanel];
-        if (panel) panel.photoIndex = i;
-        refreshPhotoStrip(); render();
-      });
-      els.photoStrip.appendChild(btn);
-    });
-    const panel = state.panels[state.selectedPanel];
-    if (panel) {
-      els.zoom.value = String(panel.zoom);
-      els.smartCrop.checked = !!panel.smart;
-      els.panelLabel.textContent = `Panel ${state.selectedPanel + 1} of ${state.panels.length}`;
-      if (els.panelText) {
-        const photo = state.photos[panel.photoIndex];
-        els.panelText.value = panel.label || '';
-        els.panelText.placeholder = defaultLabelFor(photo) || 'Callout label';
-      }
+  els.autoBtn?.addEventListener('click', () => {
+    ensurePanels(state, true);
+    state.selected = 0;
+    const hero = heroPhoto();
+    if (hero) state.grade = pickAutoGrade(hero);
+    if (els.grade) els.grade.value = state.grade;
+    pushHistory();
+    update();
+  });
+  els.fileInput?.addEventListener('change', () => {
+    addPhotoFiles([...els.fileInput.files]);
+    els.fileInput.value = '';
+  });
+  if (els.exportBtns) {
+    for (const btn of els.exportBtns) {
+      btn.addEventListener('click', () => exportPng(btn.dataset.size));
     }
-  };
+  }
 
-  const syncControls = () => {
-    fillSelect(els.layout, LAYOUTS, state.layout);
-    fillSelect(els.grade, [{ id: 'auto', label: 'Auto (fits photo)' }, ...GRADES], state.grade);
-    fillSelect(els.size, EXPORT_SIZES, state.size);
-    els.caption.value = state.caption;
-    els.subtitle.value = state.subtitle;
-    if (els.tagline) els.tagline.value = state.tagline;
-    els.posterInk.checked = state.posterInk;
-    els.halftone.checked = state.halftone;
-    if (els.furniture) els.furniture.checked = state.furniture;
-    if (els.callouts) els.callouts.checked = state.callouts;
-    const s = sizeById(state.size);
-    if (els.canvas.width !== s.w || els.canvas.height !== s.h) { els.canvas.width = s.w; els.canvas.height = s.h; }
-    refreshPhotoStrip();
-  };
-
-  syncControls();
-
-  els.layout.addEventListener('change', () => {
-    beginChange();
-    state.layout = els.layout.value;
-    state.selectedPanel = 0;
-    assignCast(state);
-    refreshPhotoStrip(); render();
-  });
-  els.grade.addEventListener('change', () => { beginChange(); state.grade = els.grade.value; render(); });
-  els.size.addEventListener('change', () => {
-    beginChange();
-    state.size = els.size.value;
-    const s = sizeById(state.size);
-    els.canvas.width = s.w; els.canvas.height = s.h;
-    render();
-  });
-  els.caption.addEventListener('input', () => { state.caption = els.caption.value; render(); });
-  els.subtitle.addEventListener('input', () => { state.subtitle = els.subtitle.value; render(); });
-  if (els.tagline) els.tagline.addEventListener('input', () => { state.tagline = els.tagline.value; render(); });
-  els.posterInk.addEventListener('change', () => { beginChange(); state.posterInk = els.posterInk.checked; render(); });
-  els.halftone.addEventListener('change', () => { beginChange(); state.halftone = els.halftone.checked; render(); });
-  if (els.furniture) els.furniture.addEventListener('change', () => { beginChange(); state.furniture = els.furniture.checked; render(); });
-  if (els.callouts) els.callouts.addEventListener('change', () => { beginChange(); state.callouts = els.callouts.checked; render(); });
-  if (els.panelText) els.panelText.addEventListener('input', () => {
-    const panel = state.panels[state.selectedPanel];
-    if (panel) { panel.label = els.panelText.value; render(); }
-  });
-  els.zoom.addEventListener('input', () => {
-    const panel = state.panels[state.selectedPanel];
-    if (panel) { panel.zoom = Number(els.zoom.value); render(); }
-  });
-  els.smartCrop.addEventListener('change', () => {
-    beginChange();
-    const panel = state.panels[state.selectedPanel];
-    if (panel) { panel.smart = els.smartCrop.checked; render(); }
-  });
-  if (els.autoBtn) els.autoBtn.addEventListener('click', () => {
-    beginChange();
-    assignCast(state);
-    state.grade = 'auto';
-    fillSelect(els.grade, [{ id: 'auto', label: 'Auto (fits photo)' }, ...GRADES], state.grade);
-    state.furniture = true;
-    state.callouts = true;
-    if (els.furniture) els.furniture.checked = true;
-    if (els.callouts) els.callouts.checked = true;
-    refreshPhotoStrip(); render();
-    els.status.textContent = 'Auto Cover: cast assigned, smart crop on, grade fitted to the hero photo.';
-  });
-
-  const addFiles = async (files) => {
-    for (const file of files) {
-      if (!file.type.startsWith('image/')) continue;
-      const url = URL.createObjectURL(file);
-      try {
-        const img = await loadImageFromUrl(url);
-        const base = file.name.replace(/\.[^.]+$/, '').slice(0, 18) || 'Photo';
-        state.photos.push({ img, name: base, key: base.toLowerCase().replace(/[^a-z0-9]+/g, '-') });
-      } catch { /* unreadable files are skipped */ }
-    }
-    refreshPhotoStrip(); render();
-  };
-  els.fileInput.addEventListener('change', () => { addFiles([...els.fileInput.files]); els.fileInput.value = ''; });
-  els.canvasWrap.addEventListener('dragover', (e) => { e.preventDefault(); els.canvasWrap.classList.add('dragging'); });
-  els.canvasWrap.addEventListener('dragleave', () => els.canvasWrap.classList.remove('dragging'));
-  els.canvasWrap.addEventListener('drop', (e) => {
-    e.preventDefault(); els.canvasWrap.classList.remove('dragging');
-    if (e.dataTransfer) addFiles([...e.dataTransfer.files]);
-  });
-
-  // Panel picking + drag-to-reposition on the preview canvas.
-  let drag = null;
-  const canvasPoint = (e) => {
-    const r = els.canvas.getBoundingClientRect();
-    return { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height };
-  };
-  els.canvas.addEventListener('pointerdown', (e) => {
-    const p = canvasPoint(e);
-    const rects = els.canvas._panelRects || [];
-    let hit = -1;
-    rects.forEach((rc, i) => {
-      const W = els.canvas.width, H = els.canvas.height;
-      if (p.x * W >= rc.x && p.x * W <= rc.x + rc.w && p.y * H >= rc.y && p.y * H <= rc.y + rc.h) hit = i;
-    });
-    if (hit >= 0 && hit !== state.selectedPanel) {
-      state.selectedPanel = hit;
-      state.selectedPhoto = state.panels[hit].photoIndex;
-      refreshPhotoStrip();
-    }
-    if (hit >= 0) beginChange();
-    drag = { x: p.x, y: p.y };
-    els.canvas.setPointerCapture(e.pointerId);
-  });
-  els.canvas.addEventListener('pointermove', (e) => {
-    if (!drag) return;
-    const p = canvasPoint(e);
-    const panel = state.panels[state.selectedPanel];
-    if (panel && !panel.smart) {
-      panel.ox = Math.min(1, Math.max(-1, panel.ox - (p.x - drag.x) * 2));
-      panel.oy = Math.min(1, Math.max(-1, panel.oy - (p.y - drag.y) * 2));
-      render();
-    }
-    drag = p;
-  });
-  els.canvas.addEventListener('pointerup', () => { drag = null; });
-  els.canvas.addEventListener('wheel', (e) => {
-    const panel = state.panels[state.selectedPanel];
-    if (!panel) return;
-    e.preventDefault();
-    panel.zoom = Math.min(3, Math.max(1, panel.zoom * (e.deltaY < 0 ? 1.06 : 0.94)));
-    els.zoom.value = String(panel.zoom);
-    render();
-  }, { passive: false });
-
-  els.exportBtn.addEventListener('click', () => {
-    const s = sizeById(state.size);
-    const savedW = els.canvas.width, savedH = els.canvas.height;
-    els.canvas.width = s.w; els.canvas.height = s.h;
-    renderCover(els.canvas, state);
-    els.canvas.toBlob((blob) => {
+  function exportPng(sizeId) {
+    const size = sizeById(sizeId);
+    const out = document.createElement('canvas');
+    out.width = size.w;
+    out.height = size.h;
+    renderCover(out, state);
+    out.toBlob((blob) => {
+      if (!blob) return;
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = `saltline-cover-${state.size}.png`;
+      a.download = `saltline-cover-${size.id}.png`;
       a.click();
-      els.canvas.width = savedW; els.canvas.height = savedH;
-      render();
-      els.status.textContent = `Saved saltline-cover-${state.size}.png`;
+      setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+      if (els.status) els.status.textContent = `Saved PNG ${size.w} × ${size.h}`;
     }, 'image/png');
-  });
+  }
 
-  refreshPhotoStrip();
-  return { render, refreshPhotoStrip };
+  // ---- Canvas interaction ---------------------------------------------
+  function canvasPoint(evt) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (evt.clientX - rect.left) * (canvas.width / rect.width),
+      y: (evt.clientY - rect.top) * (canvas.height / rect.height),
+    };
+  }
+
+  let drag = null;
+  canvas.addEventListener('pointerdown', (evt) => {
+    if (!zones) return;
+    const pt = canvasPoint(evt);
+    const idx = zones.panels.findIndex((r) => pt.x >= r.x && pt.x <= r.x + r.w && pt.y >= r.y && pt.y <= r.y + r.h);
+    if (idx === -1) return;
+    state.selected = idx;
+    const panel = state.panels[idx];
+    drag = {
+      idx, startX: evt.clientX, startY: evt.clientY,
+      dx: panel.dx, dy: panel.dy, rect: zones.panels[idx], moved: false,
+    };
+    canvas.setPointerCapture(evt.pointerId);
+    update();
+  });
+  canvas.addEventListener('pointermove', (evt) => {
+    if (!drag) return;
+    const panel = state.panels[drag.idx];
+    const zoom = Math.max(1, panel.zoom || 1);
+    const dxPx = evt.clientX - drag.startX;
+    const dyPx = evt.clientY - drag.startY;
+    if (Math.abs(dxPx) + Math.abs(dyPx) > 2) drag.moved = true;
+    const scaleX = canvas.width / canvas.getBoundingClientRect().width;
+    panel.dx = drag.dx - (dxPx * scaleX) / (zoom * drag.rect.w);
+    panel.dy = drag.dy - (dyPx * scaleX) / (zoom * drag.rect.h);
+    update();
+  });
+  canvas.addEventListener('pointerup', () => {
+    if (drag && drag.moved) pushHistory();
+    drag = null;
+  });
+  let wheelTimer = null;
+  canvas.addEventListener('wheel', (evt) => {
+    evt.preventDefault();
+    const panel = state.panels[state.selected];
+    if (!panel) return;
+    panel.zoom = Math.max(1, Math.min(3, (panel.zoom || 1) * (evt.deltaY < 0 ? 1.08 : 0.93)));
+    update();
+    clearTimeout(wheelTimer);
+    wheelTimer = setTimeout(pushHistory, 450);
+  }, { passive: false });
+
+  // Drag-and-drop photo intake on the stage.
+  const wrap = els.canvasWrap;
+  if (wrap) {
+    wrap.addEventListener('dragover', (evt) => evt.preventDefault());
+    wrap.addEventListener('drop', (evt) => {
+      evt.preventDefault();
+      addPhotoFiles([...evt.dataTransfer.files]);
+    });
+  }
+
+  syncControls();
+  update();
+  return { update, refreshStrip, assignPhoto };
 }

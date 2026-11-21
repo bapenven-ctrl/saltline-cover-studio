@@ -1,83 +1,228 @@
+/* Saltline Cover Studio — editor chrome.
+   Deep-indigo sidebar, tangerine accent, the cover floating on a dark
+   stage. The two display faces are bundled under fonts/ so the app
+   works fully offline. */
+
 @font-face {
   font-family: 'Anton';
   src: url('./fonts/Anton-Regular.ttf') format('truetype');
   font-weight: 400;
-  font-style: normal;
+  font-display: swap;
 }
+
 @font-face {
   font-family: 'Pacifico';
   src: url('./fonts/Pacifico-Regular.ttf') format('truetype');
   font-weight: 400;
-  font-style: normal;
+  font-display: swap;
 }
 
 * { box-sizing: border-box; }
-html, body { margin: 0; min-height: 100%; }
+
+html, body { height: 100%; }
+
 body {
-  background: #0d0817;
-  color: #f3ecff;
-  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  margin: 0;
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  background: #120826;
+  color: #e8e2ff;
 }
-.app { display: flex; align-items: stretch; min-height: 100vh; }
+
+.app {
+  display: flex;
+  min-height: 100vh;
+}
+
+/* ---- Sidebar ------------------------------------------------------- */
+
 .toolbar {
-  width: 324px; flex: 0 0 324px; overflow-y: auto; max-height: 100vh;
-  padding: 20px 18px 28px; background: #171029;
-  border-right: 1px solid #322254;
-  display: flex; flex-direction: column; gap: 18px;
+  flex: 0 0 300px;
+  width: 300px;
+  max-height: 100vh;
+  overflow-y: auto;
+  background: #171130;
+  border-right: 1px solid #241a4d;
+  padding: 22px 20px 30px;
 }
+
 .brand h1 {
-  margin: 0 0 6px; font-family: Anton, sans-serif; font-weight: 400;
-  font-size: 27px; letter-spacing: 0.04em; line-height: 1.08;
-  background: linear-gradient(92deg, #ffe9a8, #ff9a3d 55%, #ff3d7e);
-  -webkit-background-clip: text; background-clip: text; color: transparent;
+  font-family: 'Pacifico', cursive;
+  font-weight: 400;
+  font-size: 29px;
+  line-height: 1.15;
+  margin: 0 0 6px;
+  background: linear-gradient(92deg, #ffb03a, #ff5e88);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
-.brand p { margin: 0; color: #b9a8d9; font-size: 13px; }
-.group { border-top: 1px solid #2c1e4d; padding-top: 14px; display: flex; flex-direction: column; gap: 10px; }
+
+.brand p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #a99fd6;
+}
+
+.group { margin-top: 24px; }
+
 .group h2 {
-  margin: 0; font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: #ffb03a;
+  margin: 0 0 10px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  color: #ffb03a;
 }
-label { display: flex; flex-direction: column; gap: 5px; font-weight: 600; font-size: 13px; color: #ddd0f5; }
-label.check { flex-direction: row; align-items: center; gap: 8px; font-weight: 500; }
-input[type="text"], select {
-  font: inherit; padding: 8px 10px; border-radius: 8px;
-  border: 1px solid #463273; background: #221640; color: #fff;
+
+.photo-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
 }
-input[type="range"] { width: 100%; accent-color: #ff7a3d; }
-input[type="checkbox"] { accent-color: #ff7a3d; width: 16px; height: 16px; }
-input[type="file"] { font: inherit; color: #b9a8d9; }
-.file-label {
-  border: 1px dashed #5b4396; border-radius: 8px; padding: 9px 10px;
-  cursor: pointer; background: #1e1436;
+
+.chip {
+  padding: 6px 13px;
+  border-radius: 999px;
+  border: 1px solid #3a2a6e;
+  background: #251a4f;
+  color: #e8e2ff;
+  font-size: 13px;
+  cursor: pointer;
 }
-.hint { margin: 0; font-size: 12px; color: #9d8bc4; }
-.photo-strip { display: flex; flex-wrap: wrap; gap: 7px; }
-.thumb {
-  font: inherit; font-size: 12px; font-weight: 700; padding: 7px 11px;
-  border-radius: 999px; border: 1px solid #463273; background: #221640; color: #e8ddff; cursor: pointer;
+
+.chip:hover { border-color: #ff8a3d; }
+
+.chip.active {
+  background: linear-gradient(90deg, #ff8a3d, #ff5e62);
+  border-color: transparent;
+  color: #fff;
+  font-weight: 600;
 }
-.thumb.active { background: #ff7a3d; border-color: #ff7a3d; color: #22102e; }
-.row { display: flex; gap: 7px; }
-.row button {
-  font: inherit; font-size: 12px; font-weight: 700; padding: 8px 10px; flex: 1;
-  border-radius: 8px; border: 1px solid #463273; background: #221640; color: #e8ddff; cursor: pointer;
+
+.drop-box {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1.5px dashed #4a3791;
+  border-radius: 10px;
+  font-size: 13.5px;
+  color: #cfc6f5;
 }
-.row button:hover { border-color: #ff7a3d; }
-button#export {
-  font: inherit; font-weight: 800; padding: 11px 12px; border: 0; border-radius: 9px;
-  background: linear-gradient(92deg, #ff9a3d, #ff3d7e); color: #fff; cursor: pointer;
+
+.drop-box input {
+  display: block;
+  margin-top: 7px;
+  max-width: 100%;
+  font-size: 12.5px;
+  color: #cfc6f5;
 }
-#status { margin: 0; min-height: 18px; color: #8be0a4; font-size: 12px; }
+
+.hint {
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: #8f83bd;
+  margin: 10px 0 0;
+}
+
+.field {
+  display: block;
+  margin-top: 10px;
+  font-size: 13.5px;
+  color: #cfc6f5;
+}
+
+.field select,
+.field input[type='text'] {
+  display: block;
+  width: 100%;
+  margin-top: 5px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid #382a6b;
+  background: #1f1542;
+  color: #fff;
+  font-size: 14px;
+}
+
+.field input[type='range'] {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  accent-color: #ff8a3d;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 11px;
+  font-size: 13.5px;
+  color: #cfc6f5;
+  cursor: pointer;
+}
+
+.check input {
+  width: 16px;
+  height: 16px;
+  accent-color: #ff8a3d;
+}
+
+.btn-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.btn {
+  flex: 1;
+  padding: 9px 4px;
+  border-radius: 9px;
+  border: 1px solid #3a2a6e;
+  background: #251a4f;
+  color: #e8e2ff;
+  font-size: 13.5px;
+  cursor: pointer;
+}
+
+.btn:hover { border-color: #ff8a3d; }
+
+.export-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+/* ---- Stage ---------------------------------------------------------- */
+
 .stage {
-  flex: 1; display: flex; align-items: center; justify-content: center;
-  padding: 26px; background: radial-gradient(900px 600px at 60% 30%, #241545, #0d0817);
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  place-items: center;
+  padding: 26px;
+  background: radial-gradient(1200px 700px at 55% 38%, #251647, #120826);
 }
-.stage.dragging { outline: 3px dashed #ff9a3d; outline-offset: -12px; }
-canvas#cover {
-  max-width: min(94%, 900px); max-height: calc(100vh - 52px); width: auto; height: auto;
-  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.65); background: #160b2a; cursor: grab;
-  object-fit: contain;
+
+#cover {
+  max-width: 100%;
+  max-height: calc(100vh - 52px);
+  background: #14092b;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.55);
+  cursor: grab;
 }
+
+#cover:active { cursor: grabbing; }
+
+/* ---- Screenshot scenes ---------------------------------------------- */
+
 body.shot-cover .toolbar { display: none; }
-body.shot-cover .app { min-height: 0; }
-body.shot-cover .stage { padding: 0; background: #160b2a; }
-body.shot-cover canvas#cover { width: 100vw; height: 100vh; max-width: none; max-height: none; box-shadow: none; }
+
+body.shot-cover .stage { padding: 0; }
+
+body.shot-cover #cover {
+  width: 100vw;
+  height: 100vh;
+  max-width: none;
+  max-height: none;
+  box-shadow: none;
+  cursor: default;
+}
