@@ -4,7 +4,9 @@
 // rectangle with its frame and its character callout chip. Over the panels
 // goes the poster furniture: a masthead band with stars and a pull-quote, a
 // chrome title block with script subtitle and tagline ribbon, and a credits
-// strip with barcode and seal. A vignette and fine grain finish the sheet.
+// strip with barcode and seal. On the poster and ensemble layouts the title
+// block sits in its own painted sunset bed below the panels, never over
+// them. A vignette and fine grain finish the sheet.
 
 import { getPanelRects, furnitureZones, POSTER_LAYOUTS } from './panels.js';
 import { lutForGrade, applyLUTToImageData, posterizeBlend, hardPosterize, resolveGradeId } from './grades.js';
@@ -98,8 +100,9 @@ function paintPanel(ctx, image, panelRect, panelState, lut, options) {
   ctx.restore();
 }
 
-// Slanted character callout chip at a panel's bottom-left corner.
-function paintCallout(ctx, panelRect, label, H) {
+// Slanted character callout chip at a panel's bottom-left corner. When
+// maxBottom is given, the chip rides up so its bottom edge stays above it.
+function paintCallout(ctx, panelRect, label, H, maxBottom = null) {
   const text = (label || '').trim().toUpperCase();
   if (!text) return;
   const inset = Math.max(6, Math.round(Math.min(panelRect.w, panelRect.h) * 0.045));
@@ -119,7 +122,8 @@ function paintCallout(ctx, panelRect, label, H) {
   }
   const cw = Math.round(textW + tickW + padX * 2);
   const x = panelRect.x + inset;
-  const y = panelRect.y + panelRect.h - inset - ch;
+  let y = panelRect.y + panelRect.h - inset - ch;
+  if (maxBottom != null && y + ch > maxBottom) y = maxBottom - ch;
   const slant = Math.round(ch * 0.36);
   ctx.beginPath();
   ctx.moveTo(x, y + ch);
@@ -308,16 +312,46 @@ function fitFont(ctx, text, family, startSize, maxWidth, spacingRatio = 0) {
   return size;
 }
 
+// The title bed: a designed sunset field — deep purple melting into
+// magenta, a soft sun disc glowing behind where the title will sit, and a
+// gold rule along the top edge where the panel zone ends. Painted only for
+// the layouts that reserve a bed (poster, ensemble).
+function paintTitleBed(ctx, W, bedTop, creditsTop) {
+  const bedH = creditsTop - bedTop;
+  const grad = ctx.createLinearGradient(0, bedTop, 0, creditsTop);
+  grad.addColorStop(0, '#2b0a4e');
+  grad.addColorStop(0.55, '#5c0f6e');
+  grad.addColorStop(1, '#93196d');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, bedTop, W, bedH);
+  ctx.save();
+  ctx.beginPath(); ctx.rect(0, bedTop, W, bedH); ctx.clip();
+  const sunGrad = ctx.createLinearGradient(0, bedTop + bedH * 0.21, 0, bedTop + bedH * 0.95);
+  sunGrad.addColorStop(0, 'rgba(255, 150, 61, 0.5)');
+  sunGrad.addColorStop(1, 'rgba(255, 61, 138, 0.5)');
+  ctx.fillStyle = sunGrad;
+  ctx.beginPath();
+  ctx.arc(W / 2, bedTop + bedH * 0.58, bedH * 0.37, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+  ctx.fillStyle = '#ffc94d';
+  ctx.fillRect(0, bedTop, W, Math.max(2, Math.round(bedH * 0.008)));
+}
+
 // Chrome title block: title, script subtitle, tagline ribbon — stacked
-// above the credits strip with every line fully inside the canvas.
-function paintTitleBlock(ctx, W, H, state, creditsTop) {
+// above the credits strip with every line fully inside the canvas. When
+// bedTop is given (poster, ensemble), the whole stack is sized to the bed
+// and the title shrinks until its cap top clears the bed's top edge, so
+// no letter ever reaches the panels above.
+function paintTitleBlock(ctx, W, H, state, creditsTop, bedTop = null) {
   const title = (state.caption || '').trim().toUpperCase();
   const sub = (state.subtitle || '').trim();
   const tagline = (state.tagline || '').trim().toUpperCase();
-  const marginBottom = Math.round(H * 0.016);
+  const bedH = bedTop != null ? creditsTop - bedTop : 0;
+  const marginBottom = bedTop != null ? Math.round(bedH * 0.05) : Math.round(H * 0.016);
 
   // Tagline ribbon at the bottom of the stack.
-  const ribH = Math.round(H * 0.047);
+  const ribH = bedTop != null ? Math.round(bedH * 0.15) : Math.round(H * 0.047);
   const ribBottom = creditsTop - marginBottom;
   const ribTop = ribBottom - ribH;
   if (tagline) {
@@ -336,9 +370,9 @@ function paintTitleBlock(ctx, W, H, state, creditsTop) {
   }
 
   // Script subtitle with a neon glow, just above the ribbon.
-  let subBaseline = ribTop - Math.round(H * 0.012);
+  let subBaseline = ribTop - (bedTop != null ? Math.round(bedH * 0.03) : Math.round(H * 0.012));
   if (sub) {
-    const sSize = fitFont(ctx, sub, 'Pacifico, cursive', Math.round(H * 0.05), W * 0.72);
+    const sSize = fitFont(ctx, sub, 'Pacifico, cursive', bedTop != null ? Math.round(bedH * 0.16) : Math.round(H * 0.05), W * 0.72);
     ctx.font = `400 ${sSize}px Pacifico, cursive`;
     ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
     ctx.shadowColor = '#ff2d78';
@@ -357,7 +391,13 @@ function paintTitleBlock(ctx, W, H, state, creditsTop) {
 
   // The title itself: chrome retro-stripe fill, dark outline, light keyline.
   if (title) {
-    const tSize = fitFont(ctx, title, 'Anton, sans-serif', Math.round(H * 0.2), W * 0.94, 0.02);
+    let tSize = fitFont(ctx, title, 'Anton, sans-serif', bedTop != null ? Math.round(bedH * 0.62) : Math.round(H * 0.2), W * 0.94, 0.02);
+    if (bedTop != null) {
+      // Shrink until the cap top, outline included, clears the bed's top.
+      while (tSize > 30 && subBaseline - Math.round(tSize * 0.1) - tSize * 0.84 < bedTop + Math.round(bedH * 0.03)) {
+        tSize -= 4;
+      }
+    }
     ctx.save();
     ctx.translate(Math.round(W / 2), 0);
     ctx.font = `400 ${tSize}px Anton, sans-serif`;
@@ -437,20 +477,27 @@ export function renderCover(canvas, state) {
     const ps = state.panels[i] || { photoIndex: i % Math.max(1, state.photos.length), zoom: 1, ox: 0, oy: 0, smart: true };
     const photo = state.photos[ps.photoIndex] || state.photos[0];
     paintPanel(ctx, photo ? photo.img : null, panelRect, ps, lut, { posterInk: state.posterInk, halftone: state.halftone, gradeId, thinFrame, W, H });
-    if (state.callouts) callouts.push([panelRect, ps.label || defaultLabelFor(photo)]);
+    if (state.callouts) callouts.push([panelRect, ps.label || defaultLabelFor(photo), i]);
   });
-  paintVignetteAndGrain(ctx, W, H);
 
   const furniture = state.furniture !== false;
   const creditsTop = furniture && zones.creditsH > 0 ? H - zones.creditsH : H;
-  // Soft shade behind the title block so type stays readable on busy photos.
-  const shadeTop = creditsTop - Math.round(H * 0.42);
-  const shade = ctx.createLinearGradient(0, shadeTop, 0, creditsTop);
-  shade.addColorStop(0, 'rgba(10,5,22,0)');
-  shade.addColorStop(1, 'rgba(10,5,22,0.5)');
-  ctx.fillStyle = shade; ctx.fillRect(0, shadeTop, W, creditsTop - shadeTop);
+  // Layouts with a title bed (poster, ensemble) get the designed sunset bed
+  // under their panels; the title stack lives entirely inside it.
+  const bedTop = zones.titleBedH > 0 ? zones.bottom : null;
+  if (bedTop != null) paintTitleBed(ctx, W, bedTop, creditsTop);
+  paintVignetteAndGrain(ctx, W, H);
 
-  paintTitleBlock(ctx, W, H, state, creditsTop);
+  if (bedTop == null) {
+    // Soft shade behind the title block so type stays readable on busy photos.
+    const shadeTop = creditsTop - Math.round(H * 0.42);
+    const shade = ctx.createLinearGradient(0, shadeTop, 0, creditsTop);
+    shade.addColorStop(0, 'rgba(10,5,22,0)');
+    shade.addColorStop(1, 'rgba(10,5,22,0.5)');
+    ctx.fillStyle = shade; ctx.fillRect(0, shadeTop, W, creditsTop - shadeTop);
+  }
+
+  paintTitleBlock(ctx, W, H, state, creditsTop, bedTop);
   if (furniture && zones.mastH > 0) paintMasthead(ctx, W, H, zones.mastH, margin);
   if (furniture && zones.creditsH > 0) paintCredits(ctx, W, H, zones.creditsH, margin);
   // The SALTLINE pill bug: top-left, just under the masthead when present.
@@ -458,7 +505,13 @@ export function renderCover(canvas, state) {
   paintPillBug(ctx, W, H, margin, pillY);
   // Callout chips paint last, like stickers over the finished poster, so a
   // chip at a panel's bottom corner stays readable where the title block
-  // overlaps that corner.
-  for (const [panelRect, label] of callouts) paintCallout(ctx, panelRect, label, H);
+  // overlaps that corner. On the wide Key Art cover the hero chip rides up
+  // a touch so the tagline ribbon never clips its bottom edge.
+  const heroRibTop = state.layout === 'keyart' && (state.tagline || '').trim()
+    ? creditsTop - Math.round(H * 0.016) - Math.round(H * 0.047)
+    : null;
+  for (const [panelRect, label, i] of callouts) {
+    paintCallout(ctx, panelRect, label, H, heroRibTop != null && i === 0 ? heroRibTop - 6 : null);
+  }
   return { gradeId, panelCount: rects.length };
 }

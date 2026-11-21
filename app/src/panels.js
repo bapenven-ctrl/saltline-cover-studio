@@ -2,8 +2,10 @@
 // The three poster layouts (keyart, poster, ensemble) reserve a masthead
 // band at the top and a credits strip at the bottom — the poster furniture
 // zones — and lay their panels out straight, with thin frames and dark
-// gutters, in the space between. The classic layouts keep the looser
-// hand-assembled collage geometry from earlier rounds.
+// gutters, in the space between. Poster and ensemble additionally reserve
+// a title bed above the credits strip, so their panel zones end clear of
+// the title block. The classic layouts keep the looser hand-assembled
+// collage geometry from earlier rounds.
 
 export const LAYOUTS = [
   { id: 'keyart', label: 'Key Art (wide)' },
@@ -39,26 +41,31 @@ function rect(x, y, w, h, rot = 0) {
   return { x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h), rot };
 }
 
-// furnitureZones(layoutId, W, H) -> { mastH, creditsH, top, bottom }
-// top/bottom bound the panel area. Classic layouts reserve nothing.
+// furnitureZones(layoutId, W, H) -> { mastH, creditsH, top, bottom, titleBedH }
+// top/bottom bound the panel area. Poster and ensemble also reserve a
+// title bed (titleBedH) between the panel area and the credits strip: the
+// title block lives entirely inside that bed and never overlaps a panel.
+// Classic layouts reserve nothing.
 export function furnitureZones(layoutId, W, H) {
   switch (layoutId) {
     case 'keyart': {
       const mastH = Math.round(H * 0.09), creditsH = Math.round(H * 0.062);
-      return { mastH, creditsH, top: mastH, bottom: H - creditsH };
+      return { mastH, creditsH, top: mastH, bottom: H - creditsH, titleBedH: 0 };
     }
     case 'poster': {
-      const mastH = Math.round(H * 0.072), creditsH = Math.round(H * 0.052);
-      // The panel area also leaves a title bed above the credits strip, so
-      // the lower-third title block never swallows the bottom row's faces.
-      return { mastH, creditsH, top: mastH, bottom: H - creditsH - Math.round(H * 0.185) };
+      // Masthead ~7%, panel zone ~57%, title bed ~32%, credits ~4%.
+      const mastH = Math.round(H * 0.07), creditsH = Math.round(H * 0.04);
+      const bedH = Math.round(H * 0.32);
+      return { mastH, creditsH, top: mastH, bottom: H - creditsH - bedH, titleBedH: bedH };
     }
     case 'ensemble': {
-      const mastH = Math.round(H * 0.082), creditsH = Math.round(H * 0.06);
-      return { mastH, creditsH, top: mastH, bottom: H - creditsH - Math.round(H * 0.15) };
+      // Masthead ~8%, panel grid in the top ~62%, title bed ~26%, credits ~4%.
+      const mastH = Math.round(H * 0.08), creditsH = Math.round(H * 0.04);
+      const bedH = Math.round(H * 0.26);
+      return { mastH, creditsH, top: mastH, bottom: H - creditsH - bedH, titleBedH: bedH };
     }
     default:
-      return { mastH: 0, creditsH: 0, top: 0, bottom: H };
+      return { mastH: 0, creditsH: 0, top: 0, bottom: H, titleBedH: 0 };
   }
 }
 
@@ -92,8 +99,8 @@ export function getPanelRects(layoutId, width, height) {
     case 'poster': {
       // Row of two, hero, row of two. The bottom row is the tallest band:
       // its wide panels need the height to keep a close-up face whole.
-      const topH = Math.round(areaH * 0.2);
-      const botH = Math.round(areaH * 0.27);
+      const topH = Math.round(areaH * 0.21);
+      const botH = Math.round(areaH * 0.3);
       const heroH = areaH - topH - botH - g * 2;
       const cw = Math.round((iw - g) / 2);
       const y2 = areaY + topH + g, y3 = y2 + heroH + g;
