@@ -1,51 +1,55 @@
-// Wires the page: pick a photo, type a caption, export the square cover as a PNG. A `?shot=` query sets up a fixed
-// scene for a screenshot instead (./shots.js).
-import { drawCover } from './cover.js';
-import { runShot } from './shots.js';
+// main.js — Entry point for Saltline Cover Studio.
+//
+// With no query string this boots the editor: the eight bundled sample
+// photos are already composed into the Key Art cover, ready to rearrange.
+// With ?shot= it paints one deterministic screenshot scene instead.
+// Everything runs locally from the files under app/ — no network calls.
 
-const canvas = document.getElementById('cover');
-const caption = document.getElementById('caption');
-const status = document.getElementById('status');
-let photo = null;
+import { createState, ensurePanels, initEditor, loadSamplePhotos, applyAssignment } from './editor.js';
+import { renderCover, sizeById } from './render.js';
+import { runShotScene } from './shots.js';
 
-function redraw() {
-  drawCover(canvas, photo, caption.value);
+const els = {
+  canvas: document.getElementById('cover'),
+  canvasWrap: document.getElementById('canvas-wrap'),
+  layout: document.getElementById('layout'),
+  grade: document.getElementById('grade'),
+  caption: document.getElementById('caption'),
+  subtitle: document.getElementById('subtitle'),
+  furniture: document.getElementById('furniture'),
+  callouts: document.getElementById('callouts'),
+  zoom: document.getElementById('zoom'),
+  smartCrop: document.getElementById('smart-crop'),
+  panelLabel: document.getElementById('panel-label'),
+  calloutLabel: document.getElementById('callout-label'),
+  photoStrip: document.getElementById('photo-strip'),
+  fileInput: document.getElementById('photo-file'),
+  undoBtn: document.getElementById('undo'),
+  redoBtn: document.getElementById('redo'),
+  autoBtn: document.getElementById('auto-cover'),
+  exportBtns: [...document.querySelectorAll('.export-btn')],
+  status: document.getElementById('status'),
+};
+
+const params = new URLSearchParams(location.search);
+
+async function boot() {
+  if (params.get('shot')) {
+    await runShotScene(params, els);
+    return;
+  }
+  const state = createState();
+  const size = sizeById(state.size);
+  els.canvas.width = size.w;
+  els.canvas.height = size.h;
+  await loadSamplePhotos(state);
+  ensurePanels(state);
+  applyAssignment(state);
+  if (document.fonts && document.fonts.ready) {
+    try { await document.fonts.ready; } catch { /* system fonts still render */ }
+  }
+  initEditor(state, els);
+  renderCover(els.canvas, state);
 }
 
-/** Loads an image from a URL, resolving to the image once it can be drawn. */
-export function loadImage(url) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = reject;
-    img.src = url;
-  });
-}
-
-document.getElementById('photo').addEventListener('change', async (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
-  photo = await loadImage(URL.createObjectURL(file));
-  redraw();
-});
-caption.addEventListener('input', redraw);
-document.getElementById('export').addEventListener('click', () => {
-  canvas.toBlob((blob) => {
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'cover-1080x1080.png';
-    a.click();
-    status.textContent = 'Saved cover-1080x1080.png';
-  }, 'image/png');
-});
-
-const shot = new URLSearchParams(location.search).get('shot');
-if (shot) {
-  runShot(shot, new URLSearchParams(location.search), async (sample, text) => {
-    photo = await loadImage(sample);
-    caption.value = text;
-    redraw();
-  });
-} else {
-  redraw();
-}
+boot();
