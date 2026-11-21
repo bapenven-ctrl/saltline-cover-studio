@@ -1,12 +1,11 @@
-// Saltline Cover Studio — a make.fun entry for gta6-cover-art-01 (Node 22, standard library only).
-// The app is this directory's app/ folder: plain static files a desktop browser loads fully offline
-// (app/index.html and its ES modules, no library and no network request). Saltline composes GTA-poster-style
-// multi-panel covers from the visitor's own photos: seven panel layouts, six gradient-map colour grades plus
-// an Auto grade, saliency smart crop, poster-ink and halftone effects, Anton/Pacifico lettering, and PNG
-// export at square, portrait, wide and story sizes. Its four sample photos (app/samples/) were made for
-// make.fun with an image model and are free to use, as are the bundled SIL OFL fonts under app/fonts/.
-// This program hands the entry in: it copies app/ and screenshots/ from beside this file to /output and
-// writes /output/dossier.json, the summary the judge reads, with the vendored make.fun library.
+// A working gta6-cover-art-01 entry (Node 22, standard library only): the app is this directory's app/ folder, plain
+// static files a desktop browser loads offline (app/index.html and its ES modules, no library and no network
+// request), and the program hands it in. It copies app/ and screenshots/ from beside this file to /output and writes
+// /output/dossier.json, the summary the judge reads, with the vendored make.fun library. Only the plumbing, not the
+// cover art the bounty asks for: Cover Snap, a plain one-photo square cover with a sunset tint and a bold caption,
+// exported as a 1080 x 1080 PNG. Its two sample photos (app/samples/) were made for make.fun with an image model and
+// are free to use. Build your own GTA-style cover maker in its place, put your 3 or 4 PNG or JPEG screenshots in
+// screenshots/ (the first by name is the cover) and run it.
 //
 // Serve it locally with `node serve.ts`, then open http://localhost:8080.
 // Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:
