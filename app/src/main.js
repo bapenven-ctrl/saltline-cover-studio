@@ -1,51 +1,62 @@
-// Wires the page: pick a photo, type a caption, export the square cover as a PNG. A `?shot=` query sets up a fixed
-// scene for a screenshot instead (./shots.js).
-import { drawCover } from './cover.js';
-import { runShot } from './shots.js';
+// main.js — Entry point for Saltline Cover Studio.
+// Boots the editor with the eight bundled sample photos already composed
+// into a Key Art cover, or, when the URL carries ?shot=, paints one
+// deterministic scene for screenshots instead. Everything runs locally
+// from files under app/.
 
-const canvas = document.getElementById('cover');
-const caption = document.getElementById('caption');
-const status = document.getElementById('status');
-let photo = null;
+import { createState, ensurePanels, initEditor, loadSamplePhotos } from './editor.js';
+import { renderCover, sizeById } from './render.js';
+import { getPanelRects } from './panels.js';
+import { runShotScene } from './shots.js';
 
-function redraw() {
-  drawCover(canvas, photo, caption.value);
-}
+const els = {
+  canvas: document.getElementById('cover'),
+  canvasWrap: document.getElementById('canvas-wrap'),
+  layout: document.getElementById('layout'),
+  grade: document.getElementById('grade'),
+  size: document.getElementById('size'),
+  caption: document.getElementById('caption'),
+  subtitle: document.getElementById('subtitle'),
+  tagline: document.getElementById('tagline'),
+  posterInk: document.getElementById('poster-ink'),
+  halftone: document.getElementById('halftone'),
+  furniture: document.getElementById('furniture'),
+  callouts: document.getElementById('callouts'),
+  zoom: document.getElementById('zoom'),
+  smartCrop: document.getElementById('smart-crop'),
+  panelLabel: document.getElementById('panel-label'),
+  panelText: document.getElementById('panel-text'),
+  photoStrip: document.getElementById('photo-strip'),
+  fileInput: document.getElementById('photo-file'),
+  exportBtn: document.getElementById('export'),
+  undoBtn: document.getElementById('undo'),
+  redoBtn: document.getElementById('redo'),
+  autoBtn: document.getElementById('auto-cover'),
+  status: document.getElementById('status'),
+};
 
-/** Loads an image from a URL, resolving to the image once it can be drawn. */
-export function loadImage(url) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = reject;
-    img.src = url;
+const params = new URLSearchParams(location.search);
+
+async function boot() {
+  if (params.get('shot')) {
+    await runShotScene(params, els);
+    return;
+  }
+  const state = createState();
+  const size = sizeById(state.size);
+  els.canvas.width = size.w;
+  els.canvas.height = size.h;
+  await loadSamplePhotos(state);
+  ensurePanels(state);
+  if (document.fonts && document.fonts.ready) {
+    try { await document.fonts.ready; } catch { /* system fonts still render */ }
+  }
+  const editor = initEditor(state, els, (s) => {
+    els.canvas._panelRects = getPanelRects(s.layout, els.canvas.width, els.canvas.height);
   });
+  renderCover(els.canvas, state);
+  els.canvas._panelRects = getPanelRects(state.layout, els.canvas.width, els.canvas.height);
+  editor.refreshPhotoStrip();
 }
 
-document.getElementById('photo').addEventListener('change', async (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
-  photo = await loadImage(URL.createObjectURL(file));
-  redraw();
-});
-caption.addEventListener('input', redraw);
-document.getElementById('export').addEventListener('click', () => {
-  canvas.toBlob((blob) => {
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'cover-1080x1080.png';
-    a.click();
-    status.textContent = 'Saved cover-1080x1080.png';
-  }, 'image/png');
-});
-
-const shot = new URLSearchParams(location.search).get('shot');
-if (shot) {
-  runShot(shot, new URLSearchParams(location.search), async (sample, text) => {
-    photo = await loadImage(sample);
-    caption.value = text;
-    redraw();
-  });
-} else {
-  redraw();
-}
+boot();
