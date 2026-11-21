@@ -27,6 +27,15 @@ function applyParams(state, params) {
   if (params.get('caption')) state.caption = params.get('caption');
   if (params.get('subtitle')) state.subtitle = params.get('subtitle');
   ensurePanels(state);
+  // Poster framing fix: in the portrait poster the smart crop seats
+  // the Fixer's chin right on her panel's bottom edge. Slide that one
+  // panel's crop window a little further down the photo so her whole
+  // face, chin included, sits inside the frame with a margin. Scoped
+  // to the poster scene; every other layout keeps the default crop.
+  if (state.layout === 'poster') {
+    const fixer = state.panels.find((p) => p.photoId === 'redhead');
+    if (fixer) fixer.dy = 0.07;
+  }
 }
 
 function signalReady() {

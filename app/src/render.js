@@ -112,7 +112,7 @@ function titleMetrics(W, H, zones, state) {
 
 // ---- Furniture pieces ------------------------------------------------
 
-function paintMasthead(ctx, zone, W) {
+function paintMasthead(ctx, zone, W, layoutId) {
   const { y, h } = zone;
   const grad = ctx.createLinearGradient(0, y, 0, y + h);
   grad.addColorStop(0, '#1d0f3d');
@@ -133,6 +133,12 @@ function paintMasthead(ctx, zone, W) {
   ctx.textAlign = 'left';
   ctx.textBaseline = 'alphabetic';
   ctx.fillStyle = CREAM;
+  // On the portrait poster the band is short for its width, and a
+  // quote fitted without its letter spacing paints wider than it
+  // measured — wide enough to run into the VOL. 1 chip. There, apply
+  // the spacing before fitting, so the measured width is the painted
+  // width and the line ends well clear of the chip.
+  if (layoutId === 'poster') spacing(ctx, quoteSize * 0.06);
   const qSize = fitSize(ctx, 'THE HOTTEST SUMMER ON RECORD', 'Anton', 400, quoteSize, W * 0.44);
   spacing(ctx, qSize * 0.06);
   ctx.font = `400 ${qSize}px Anton`;
@@ -421,7 +427,7 @@ export function renderCover(canvas, state, opts = {}) {
   if (state.furniture) {
     const m = titleMetrics(W, H, zones, state);
     if (zones.bed) paintBed(ctx, zones.bed);
-    if (zones.masthead) paintMasthead(ctx, zones.masthead, W);
+    if (zones.masthead) paintMasthead(ctx, zones.masthead, W, state.layout);
     // The SALTLINE pill sits on the top-left panel.
     if (zones.panels.length) {
       const tl = zones.panels.reduce((a, b) => (b.x < a.x || (b.x === a.x && b.y < a.y) ? b : a), zones.panels[0]);
