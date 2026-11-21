@@ -42,6 +42,10 @@ export async function runShotScene(params, els) {
   if (params.get('subtitle')) state.subtitle = params.get('subtitle');
   ensurePanels(state);
   applyAssignment(state);
+  // Poster scene direction: in the top-left panel the Fixer's face sits
+  // low in her photo, so her crop window is nudged down the photo until
+  // the whole face, chin included, rests inside the panel with margin.
+  if (state.layout === 'poster' && state.panels[0]) state.panels[0].dy = 0.37;
   await fontsReady();
 
   if (params.get('shot') === 'cover') {
